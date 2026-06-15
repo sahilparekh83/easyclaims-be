@@ -8,3 +8,19 @@ build/
 .venv/
 venv/
 .pytest_cache/
+
+# Caches
+.ruff_cache/
+.mypy_cache/
+
+# Test coverage
+.coverage
+htmlcov/
+
+# IDEs
+.idea/
+.vscode/
+
+# Local databases
+*.sqlite3
+*.db
