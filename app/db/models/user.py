@@ -17,6 +17,7 @@ class User(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     email = Column(String, unique=True, nullable=False, index=True)
     name = Column(String, nullable=True)
+    mobile_no = Column(String, nullable=True)
     user_type = Column(SAEnum(UserType), nullable=False)
     is_active = Column(Boolean, default=True, nullable=False)
     is_deleted = Column(Boolean, default=False, nullable=False)

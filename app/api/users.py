@@ -32,6 +32,7 @@ def _user_to_response(user, user_service: UserService) -> dict:
         "id": str(user.id),
         "email": user.email,
         "name": user.name,
+        "mobile_no": user.mobile_no,
         "user_type": user.user_type.value if hasattr(user.user_type, "value") else user.user_type,
         "is_active": user.is_active,
         "roles": roles,

@@ -39,9 +39,9 @@ class UserQuery:
                 session.expunge(u)
             return users
 
-    def create_user(self, email: str, name: str, user_type: str) -> User:
+    def create_user(self, email: str, name: str, user_type: str, mobile_no: str = None) -> User:
         with session_scope() as session:
-            user = User(email=email.lower(), name=name, user_type=user_type)
+            user = User(email=email.lower(), name=name, user_type=user_type, mobile_no=mobile_no)
             session.add(user)
             session.flush()
             session.expunge(user)

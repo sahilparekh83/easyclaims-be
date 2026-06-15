@@ -34,6 +34,7 @@ class UserService:
             email=str(data.email),
             name=data.name or "",
             user_type=data.user_type,
+            mobile_no=data.mobile_no,
         )
         default_role = self.role_query.get_role_by_name(data.user_type.value)
         if default_role:

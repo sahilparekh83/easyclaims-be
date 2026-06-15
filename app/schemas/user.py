@@ -7,11 +7,13 @@ from ..constants import UserType
 class UserCreate(BaseModel):
     email: EmailStr
     name: Optional[str] = None
+    mobile_no: Optional[str] = None
     user_type: UserType = UserType.CUSTOMER
 
 
 class UserUpdate(BaseModel):
     name: Optional[str] = None
+    mobile_no: Optional[str] = None
     is_active: Optional[bool] = None
 
 
@@ -28,6 +30,7 @@ class UserResponse(BaseModel):
     id: UUID
     email: str
     name: Optional[str]
+    mobile_no: Optional[str] = None
     user_type: UserType
     is_active: bool
     roles: List[str] = []
