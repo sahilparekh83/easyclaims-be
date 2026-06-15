@@ -1,2 +1,3 @@
 def run_seed():
-    pass
+    from seeders import run_seed as _run_seed
+    _run_seed()
