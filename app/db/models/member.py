@@ -2,7 +2,6 @@ import uuid
 from datetime import datetime, timezone
 from sqlalchemy import Column, String, Integer, Boolean, Date, DateTime, ForeignKey, UniqueConstraint
 from sqlalchemy.dialects.postgresql import UUID
-from sqlalchemy.orm import relationship
 from ..base import Base
 
 
@@ -22,9 +21,6 @@ class MemberEnrollment(Base):
     end_date = Column(Date, nullable=False)
     created_at = Column(DateTime(timezone=True), default=utcnow)
     updated_at = Column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
-
-    plan = relationship("MembershipPlan")
-    partner = relationship("Partner")
 
     __table_args__ = (
         UniqueConstraint("user_id", "partner_id", name="uq_member_partner"),
@@ -99,3 +95,7 @@ class DpdpConsent(Base):
     version = Column(String, nullable=False)
     source = Column(String, nullable=False, default="portal")
     created_at = Column(DateTime(timezone=True), default=utcnow)
+
+    def __init__(self, **kwargs):
+        kwargs.setdefault("source", "portal")
+        super().__init__(**kwargs)

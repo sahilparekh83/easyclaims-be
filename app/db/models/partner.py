@@ -2,7 +2,6 @@ import uuid
 from datetime import datetime, timezone
 from sqlalchemy import Column, String, Integer, Boolean, DateTime, ForeignKey, UniqueConstraint
 from sqlalchemy.dialects.postgresql import UUID
-from sqlalchemy.orm import relationship
 from ..base import Base
 
 
@@ -25,8 +24,6 @@ class Partner(Base):
     created_at = Column(DateTime(timezone=True), default=utcnow)
     updated_at = Column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
 
-    user = relationship("User", foreign_keys=[user_id])
-
     def __init__(self, **kwargs):
         kwargs.setdefault("status", "Active")
         kwargs.setdefault("api_rate_limit", 600)
@@ -42,9 +39,9 @@ class PartnerPlan(Base):
     plan_id = Column(UUID(as_uuid=True), ForeignKey("membership_plans.id"), nullable=False)
     created_at = Column(DateTime(timezone=True), default=utcnow)
 
-    partner = relationship("Partner")
-    plan = relationship("MembershipPlan")
-
     __table_args__ = (
         UniqueConstraint("partner_id", "plan_id", name="uq_partner_plan"),
     )
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)

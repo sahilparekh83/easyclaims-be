@@ -1,6 +1,6 @@
 import uuid
 from datetime import datetime, timezone
-from sqlalchemy import Column, String, Integer, Boolean, Text, DateTime
+from sqlalchemy import Column, String, Integer, BigInteger, Boolean, Text, DateTime
 from sqlalchemy.dialects.postgresql import UUID
 from ..base import Base
 
@@ -16,7 +16,7 @@ class MembershipPlan(Base):
     name = Column(String, nullable=False, unique=True)
     tagline = Column(String, nullable=False, default="")
     info_text = Column(Text, nullable=True)
-    price = Column(Integer, nullable=False, default=0)
+    price = Column(BigInteger, nullable=False, default=0)
     cycle = Column(String, nullable=False, default="Annual")
     plan_type = Column(String, nullable=False, default="global")
     status = Column(String, nullable=False, default="Draft")
