@@ -73,6 +73,7 @@ class Settings(BaseSettings):
     SMTP_PASSWORD: str = os.getenv("SMTP_PASSWORD", "")
     SMTP_FROM_EMAIL: str = os.getenv("SMTP_FROM_EMAIL", "")
     SMTP_TLS: bool = os.getenv("SMTP_TLS", "true").lower() == "true"
+    UPLOAD_DIR: str = os.getenv("UPLOAD_DIR", "uploads")
 
     # ── Middleware ────────────────────────────────────────────────────────────
     REQUEST_TIMEOUT_SECONDS: int = int(os.getenv("REQUEST_TIMEOUT_SECONDS", "30"))
