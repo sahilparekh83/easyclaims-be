@@ -78,12 +78,22 @@ async def verify_otp(body: VerifyOTPRequest, response: Response):
     expires_at = datetime.now(timezone.utc) + timedelta(seconds=settings.ACCESS_TOKEN_EXPIRE_SECONDS)
     user_query.create_auth_session(str(user.id), jti, expires_at)
 
+    default_partner_id = None
+    if user.user_type.value == "CUSTOMER":
+        from ..db.queries.member_query import MemberQuery
+        first_enrollment = MemberQuery().get_first_active_enrollment(str(user.id))
+        if first_enrollment:
+            default_partner_id = str(first_enrollment.partner_id)
+
     _set_auth_cookies(response, access_token, refresh_token)
 
-    return ResponseModel.ok(data=TokenResponse(
-        access_token=access_token,
-        refresh_token=refresh_token,
-    ).model_dump())
+    return ResponseModel.ok(data={
+        **TokenResponse(
+            access_token=access_token,
+            refresh_token=refresh_token,
+        ).model_dump(),
+        "default_partner_id": default_partner_id,
+    })
 
 
 @auth_router.post("/refresh", response_model=ResponseModel)
