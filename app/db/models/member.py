@@ -16,7 +16,7 @@ class MemberEnrollment(Base):
     user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
     partner_id = Column(UUID(as_uuid=True), ForeignKey("partners.id"), nullable=False)
     plan_id = Column(UUID(as_uuid=True), ForeignKey("membership_plans.id"), nullable=False)
-    status = Column(String, nullable=False, default="active")
+    status = Column(String, nullable=False, default="Active")
     start_date = Column(Date, nullable=False)
     end_date = Column(Date, nullable=False)
     created_at = Column(DateTime(timezone=True), default=utcnow)
@@ -27,7 +27,7 @@ class MemberEnrollment(Base):
     )
 
     def __init__(self, **kwargs):
-        kwargs.setdefault("status", "active")
+        kwargs.setdefault("status", "Active")
         super().__init__(**kwargs)
 
 

@@ -1,13 +1,24 @@
-from typing import Optional, List
+import uuid as _uuid
+from typing import Optional, List, Tuple
 from ..models.partner import Partner
 from ..session import session_scope
+from .list_helper import apply_global_filter, apply_field_filters, apply_sort, paginate
+
+_GLOBAL_COLS = lambda: [Partner.name, Partner.partner_type, Partner.status, Partner.city]
+_FILTER_MAP = {
+    "name":         Partner.name,
+    "partner_type": Partner.partner_type,
+    "status":       Partner.status,
+    "city":         Partner.city,
+}
 
 
 class PartnerQuery:
     def get_by_id(self, partner_id: str) -> Optional[Partner]:
         with session_scope() as session:
             p = session.query(Partner).filter(
-                Partner.id == partner_id, Partner.is_deleted == False
+                Partner.id == _uuid.UUID(str(partner_id)),
+                Partner.is_deleted == False,
             ).first()
             if p:
                 session.expunge(p)
@@ -16,7 +27,8 @@ class PartnerQuery:
     def get_by_user_id(self, user_id: str) -> Optional[Partner]:
         with session_scope() as session:
             p = session.query(Partner).filter(
-                Partner.user_id == user_id, Partner.is_deleted == False
+                Partner.user_id == _uuid.UUID(str(user_id)),
+                Partner.is_deleted == False,
             ).first()
             if p:
                 session.expunge(p)
@@ -30,6 +42,17 @@ class PartnerQuery:
             for p in partners:
                 session.expunge(p)
             return partners
+
+    def list_paginated(self, list_req) -> Tuple[int, List[Partner]]:
+        with session_scope() as session:
+            q = session.query(Partner).filter(Partner.is_deleted == False)
+            q = apply_global_filter(q, list_req.global_filter, _GLOBAL_COLS())
+            q = apply_field_filters(q, list_req.filters, _FILTER_MAP)
+            q = apply_sort(q, Partner, list_req.sort_field, list_req.sort_order)
+            total, rows = paginate(q, list_req.skip, list_req.limit)
+            for r in rows:
+                session.expunge(r)
+            return total, rows
 
     def create(self, user_id: str, name: str, partner_type: str,
                city: str = None, api_key: str = None) -> Partner:

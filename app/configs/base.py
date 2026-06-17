@@ -75,6 +75,17 @@ class Settings(BaseSettings):
     SMTP_TLS: bool = os.getenv("SMTP_TLS", "true").lower() == "true"
     UPLOAD_DIR: str = os.getenv("UPLOAD_DIR", "uploads")
 
+    # ── Frontend URL (used in welcome emails / links) ─────────────────────────
+    FRONTEND_URL: str = os.getenv("FRONTEND_URL", "http://localhost:3000")
+
+    # ── Storage ───────────────────────────────────────────────────────────────
+    STORAGE_BACKEND: str = os.getenv("STORAGE_BACKEND", "local")  # local | gcs | azure
+    STORAGE_BUCKET: str = os.getenv("STORAGE_BUCKET", "easyclaims-policies")
+    GCS_PROJECT: str = os.getenv("GCS_PROJECT", "")
+    GCS_CREDENTIALS_FILE: str = os.getenv("GCS_CREDENTIALS_FILE", "")
+    AZURE_CONTAINER: str = os.getenv("AZURE_CONTAINER", "policies")
+    AZURE_CONNECTION_STRING: str = os.getenv("AZURE_CONNECTION_STRING", "")
+
     # ── Middleware ────────────────────────────────────────────────────────────
     REQUEST_TIMEOUT_SECONDS: int = int(os.getenv("REQUEST_TIMEOUT_SECONDS", "30"))
     API_RATE_LIMIT: int = int(os.getenv("API_RATE_LIMIT", "60"))
@@ -134,6 +145,8 @@ class Settings(BaseSettings):
         "/auth/send-otp",
         "/auth/verify-otp",
         "/auth/refresh",
+        "/auth/logout",
+        "/policy-types",
     ]
 
     # ── Logging ───────────────────────────────────────────────────────────────

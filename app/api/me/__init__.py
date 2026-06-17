@@ -7,6 +7,7 @@ from .nominees import me_nominees_router
 from .consent import me_consent_router
 from .policies import me_policies_router
 from .dashboard import me_dashboard_router
+from .notifications import me_notifications_router
 
 me_router = APIRouter()
 me_router.include_router(me_partners_router, prefix="/partners", tags=["Me - Partners"])
@@ -17,3 +18,4 @@ me_router.include_router(me_nominees_router, prefix="/nominees", tags=["Me - Nom
 me_router.include_router(me_consent_router, prefix="/consent", tags=["Me - Consent"])
 me_router.include_router(me_policies_router, prefix="/policies", tags=["Me - Policies"])
 me_router.include_router(me_dashboard_router, prefix="/dashboard", tags=["Me - Dashboard"])
+me_router.include_router(me_notifications_router, prefix="/notifications", tags=["Me - Notifications"])

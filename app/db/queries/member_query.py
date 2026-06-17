@@ -1,20 +1,69 @@
+import uuid as _uuid
 from datetime import date
-from typing import Optional, List
+from typing import Optional, List, Tuple
+from sqlalchemy import and_
 from ..models.member import MemberProfile, MemberEnrollment, FamilyMember, Nominee, DpdpConsent
+from ..models.user import User
 from ..session import session_scope
+from .list_helper import apply_global_filter, apply_field_filters, apply_sort, paginate
+from ...constants import UserType
+
+_MEMBER_GLOBAL_COLS = lambda: [User.name, User.email, User.mobile_no]
+_MEMBER_FILTER_MAP = {
+    "name":      User.name,
+    "email":     User.email,
+    "mobile_no": User.mobile_no,
+    "is_active": User.is_active,
+}
 
 
 class MemberQuery:
+    # ── Paginated member list (POST /list pattern) ────────────────────────────
+
+    def list_members_paginated(
+        self, list_req, partner_id: str = None
+    ) -> Tuple[int, List[User]]:
+        """
+        Return (total, [User]) applying list_req filters.
+        If partner_id is given, only return users enrolled under that partner.
+        """
+        with session_scope() as session:
+            q = session.query(User).filter(
+                User.user_type == UserType.CUSTOMER,
+                User.is_deleted == False,
+            )
+            if partner_id:
+                q = q.join(
+                    MemberEnrollment,
+                    and_(
+                        User.id == MemberEnrollment.user_id,
+                        MemberEnrollment.partner_id == _uuid.UUID(str(partner_id)),
+                    ),
+                )
+            q = apply_global_filter(q, list_req.global_filter, _MEMBER_GLOBAL_COLS())
+            q = apply_field_filters(q, list_req.filters, _MEMBER_FILTER_MAP)
+            q = apply_sort(q, User, list_req.sort_field, list_req.sort_order)
+            total, rows = paginate(q, list_req.skip, list_req.limit)
+            for r in rows:
+                session.expunge(r)
+            return total, rows
+
     # ── Enrollments ──────────────────────────────────────────────────────────
     def get_enrollment(self, user_id: str, partner_id: str) -> Optional[MemberEnrollment]:
         with session_scope() as session:
             e = session.query(MemberEnrollment).filter(
-                MemberEnrollment.user_id == user_id,
-                MemberEnrollment.partner_id == partner_id,
+                MemberEnrollment.user_id == _uuid.UUID(str(user_id)),
+                MemberEnrollment.partner_id == _uuid.UUID(str(partner_id)),
             ).first()
             if e:
                 session.expunge(e)
             return e
+
+    def count_by_partner(self, partner_id: str) -> int:
+        with session_scope() as session:
+            return session.query(MemberEnrollment).filter(
+                MemberEnrollment.partner_id == _uuid.UUID(str(partner_id)),
+            ).count()
 
     def list_enrollments(self, user_id: str) -> List[MemberEnrollment]:
         with session_scope() as session:
@@ -39,14 +88,14 @@ class MemberQuery:
         end = today.replace(year=today.year + 1)
         with session_scope() as session:
             existing = session.query(MemberEnrollment).filter(
-                MemberEnrollment.user_id == user_id,
-                MemberEnrollment.partner_id == partner_id,
+                MemberEnrollment.user_id == _uuid.UUID(str(user_id)),
+                MemberEnrollment.partner_id == _uuid.UUID(str(partner_id)),
             ).first()
             if existing:
                 existing.plan_id = plan_id
                 existing.start_date = today
                 existing.end_date = end
-                existing.status = "active"
+                existing.status = "Active"
                 session.flush()
                 session.expunge(existing)
                 return existing
@@ -62,8 +111,8 @@ class MemberQuery:
     def update_enrollment(self, user_id: str, partner_id: str, **kwargs) -> Optional[MemberEnrollment]:
         with session_scope() as session:
             e = session.query(MemberEnrollment).filter(
-                MemberEnrollment.user_id == user_id,
-                MemberEnrollment.partner_id == partner_id,
+                MemberEnrollment.user_id == _uuid.UUID(str(user_id)),
+                MemberEnrollment.partner_id == _uuid.UUID(str(partner_id)),
             ).first()
             if not e:
                 return None
@@ -73,11 +122,21 @@ class MemberQuery:
             session.expunge(e)
             return e
 
+    def list_enrollments_by_plan_partner(self, plan_id: str, partner_id: str) -> List[MemberEnrollment]:
+        with session_scope() as session:
+            rows = session.query(MemberEnrollment).filter(
+                MemberEnrollment.plan_id == _uuid.UUID(str(plan_id)),
+                MemberEnrollment.partner_id == _uuid.UUID(str(partner_id)),
+            ).all()
+            for r in rows:
+                session.expunge(r)
+            return rows
+
     def get_first_active_enrollment(self, user_id: str) -> Optional[MemberEnrollment]:
         with session_scope() as session:
             e = session.query(MemberEnrollment).filter(
-                MemberEnrollment.user_id == user_id,
-                MemberEnrollment.status == "active",
+                MemberEnrollment.user_id == _uuid.UUID(str(user_id)),
+                MemberEnrollment.status == "Active",
             ).order_by(MemberEnrollment.created_at).first()
             if e:
                 session.expunge(e)
@@ -112,11 +171,12 @@ class MemberQuery:
                 session.expunge(r)
             return rows
 
-    def get_family_member(self, member_id: str, user_id: str) -> Optional[FamilyMember]:
+    def get_family_member(self, member_id: str, user_id: str = None) -> Optional[FamilyMember]:
         with session_scope() as session:
-            m = session.query(FamilyMember).filter(
-                FamilyMember.id == member_id, FamilyMember.user_id == user_id
-            ).first()
+            q = session.query(FamilyMember).filter(FamilyMember.id == member_id)
+            if user_id:
+                q = q.filter(FamilyMember.user_id == user_id)
+            m = q.first()
             if m:
                 session.expunge(m)
             return m
@@ -208,6 +268,15 @@ class MemberQuery:
             return True
 
     # ── Consent ──────────────────────────────────────────────────────────────
+    def list_consents(self, user_id: str) -> list:
+        with session_scope() as session:
+            items = session.query(DpdpConsent).filter(
+                DpdpConsent.user_id == user_id
+            ).order_by(DpdpConsent.created_at.desc()).all()
+            for item in items:
+                session.expunge(item)
+            return items
+
     def get_latest_consent(self, user_id: str) -> Optional[DpdpConsent]:
         with session_scope() as session:
             c = session.query(DpdpConsent).filter(

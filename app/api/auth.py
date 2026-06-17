@@ -41,10 +41,15 @@ async def send_otp(body: SendOTPRequest):
     if not user:
         raise HTTPException(status_code=404, detail="No account found with this email")
 
+    settings = get_settings()
     raw_otp = otp_service.create_otp_for_user(str(user.id), str(body.email))
     sent = email_service.send_otp_email(str(body.email), raw_otp)
+
     if not sent:
-        raise HTTPException(status_code=500, detail="Failed to send OTP email")
+        if settings.DEBUG:
+            logger.warning("SMTP not configured — OTP for %s: %s", body.email, raw_otp)
+            return ResponseModel.ok(data={"message": "OTP sent (dev mode)", "otp": raw_otp})
+        raise HTTPException(status_code=500, detail="Failed to send OTP email. Please contact support.")
 
     return ResponseModel.ok(data={"message": "OTP sent to your email"})
 
@@ -85,6 +90,12 @@ async def verify_otp(body: VerifyOTPRequest, response: Response):
         if first_enrollment:
             default_partner_id = str(first_enrollment.partner_id)
 
+    try:
+        from ..db.queries.activity_query import ActivityQuery
+        ActivityQuery().record_login(str(user.id))
+    except Exception:
+        logger.warning("Failed to record login activity for user %s", user.id)
+
     _set_auth_cookies(response, access_token, refresh_token)
 
     return ResponseModel.ok(data={
@@ -92,6 +103,9 @@ async def verify_otp(body: VerifyOTPRequest, response: Response):
             access_token=access_token,
             refresh_token=refresh_token,
         ).model_dump(),
+        "user_type": user.user_type.value,
+        "user_id": str(user.id),
+        "email": str(user.email),
         "default_partner_id": default_partner_id,
     })
 
@@ -139,7 +153,11 @@ async def refresh_token(request: Request, response: Response):
     new_refresh_token = auth_service.create_refresh_token(user_id, new_jti)
     _set_auth_cookies(response, new_access_token, new_refresh_token)
 
-    return ResponseModel.ok(data={"access_token": new_access_token, "token_type": "bearer"})
+    return ResponseModel.ok(data={
+        "access_token": new_access_token,
+        "refresh_token": new_refresh_token,
+        "token_type": "bearer",
+    })
 
 
 @auth_router.post("/logout", response_model=ResponseModel)

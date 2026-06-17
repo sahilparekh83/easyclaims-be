@@ -1,3 +1,4 @@
+import uuid as _uuid
 from typing import Optional, List
 from ..models.plan import MembershipPlan
 from ..models.partner import PartnerPlan
@@ -8,7 +9,8 @@ class PlanQuery:
     def get_by_id(self, plan_id: str) -> Optional[MembershipPlan]:
         with session_scope() as session:
             p = session.query(MembershipPlan).filter(
-                MembershipPlan.id == plan_id, MembershipPlan.is_deleted == False
+                MembershipPlan.id == _uuid.UUID(str(plan_id)),
+                MembershipPlan.is_deleted == False,
             ).first()
             if p:
                 session.expunge(p)
@@ -43,8 +45,13 @@ class PlanQuery:
                 session.expunge(p)
             return plans
 
-    def list_for_partner(self, partner_id: str) -> List[MembershipPlan]:
-        """Returns global active plans + active partner-type plans linked to this partner."""
+    def list_for_partner(self, partner_id: str, active_only: bool = False) -> List[MembershipPlan]:
+        """Returns global active plans + partner-type plans explicitly linked to this partner.
+
+        Linked partner plans are shown regardless of Draft/Active status — the admin
+        linking act is sufficient authorization. Pass active_only=True to restrict to
+        Active plans only (e.g. for member-facing enrollment selection).
+        """
         with session_scope() as session:
             global_plans = session.query(MembershipPlan).filter(
                 MembershipPlan.status == "Active",
@@ -53,15 +60,19 @@ class PlanQuery:
             ).all()
             linked_ids = [
                 row.plan_id for row in
-                session.query(PartnerPlan).filter(PartnerPlan.partner_id == partner_id).all()
+                session.query(PartnerPlan).filter(
+                    PartnerPlan.partner_id == _uuid.UUID(str(partner_id))
+                ).all()
             ]
             partner_plans = []
             if linked_ids:
-                partner_plans = session.query(MembershipPlan).filter(
+                q = session.query(MembershipPlan).filter(
                     MembershipPlan.id.in_(linked_ids),
-                    MembershipPlan.status == "Active",
                     MembershipPlan.is_deleted == False,
-                ).all()
+                )
+                if active_only:
+                    q = q.filter(MembershipPlan.status == "Active")
+                partner_plans = q.all()
             all_plans = global_plans + partner_plans
             for p in all_plans:
                 session.expunge(p)
@@ -77,7 +88,10 @@ class PlanQuery:
 
     def update(self, plan_id: str, **kwargs) -> Optional[MembershipPlan]:
         with session_scope() as session:
-            p = session.query(MembershipPlan).filter(MembershipPlan.id == plan_id).first()
+            p = session.query(MembershipPlan).filter(
+                MembershipPlan.id == _uuid.UUID(str(plan_id)),
+                MembershipPlan.is_deleted == False,
+            ).first()
             if not p:
                 return None
             for k, v in kwargs.items():
@@ -88,7 +102,10 @@ class PlanQuery:
 
     def soft_delete(self, plan_id: str) -> bool:
         with session_scope() as session:
-            p = session.query(MembershipPlan).filter(MembershipPlan.id == plan_id).first()
+            p = session.query(MembershipPlan).filter(
+                MembershipPlan.id == _uuid.UUID(str(plan_id)),
+                MembershipPlan.is_deleted == False,
+            ).first()
             if not p:
                 return False
             p.is_deleted = True

@@ -1,3 +1,4 @@
+import uuid as _uuid
 from typing import Optional
 from ..models.user import User, OTPLog, AuthSession
 from ..session import session_scope
@@ -19,7 +20,7 @@ class UserQuery:
         with session_scope() as session:
             user = (
                 session.query(User)
-                .filter(User.id == user_id, User.is_deleted == False)
+                .filter(User.id == _uuid.UUID(str(user_id)), User.is_deleted == False)
                 .first()
             )
             if user:

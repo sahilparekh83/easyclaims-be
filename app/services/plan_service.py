@@ -30,8 +30,8 @@ class PlanService:
     def list_active_global(self) -> List[MembershipPlan]:
         return self.query.list_active_global()
 
-    def list_for_partner(self, partner_id: str) -> List[MembershipPlan]:
-        return self.query.list_for_partner(partner_id)
+    def list_for_partner(self, partner_id: str, active_only: bool = False) -> List[MembershipPlan]:
+        return self.query.list_for_partner(partner_id, active_only=active_only)
 
     def get_by_id(self, plan_id: str) -> MembershipPlan:
         p = self.query.get_by_id(plan_id)

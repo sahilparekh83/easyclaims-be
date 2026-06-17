@@ -14,7 +14,11 @@ def _require_superadmin(request: Request):
     payload = getattr(request.state, "user_payload", None)
     if not payload:
         raise HTTPException(status_code=403, detail="Not authenticated")
-    if "SUPERADMIN" not in payload.get("roles", []):
+    is_superadmin = (
+        payload.get("user_type") == "SUPERADMIN"
+        or "SUPERADMIN" in payload.get("roles", [])
+    )
+    if not is_superadmin:
         raise HTTPException(status_code=403, detail="SUPERADMIN role required")
     return payload
 

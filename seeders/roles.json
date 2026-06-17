@@ -2,5 +2,6 @@
   { "role_name": "SUPERADMIN", "role_type": "ADMIN" },
   { "role_name": "CLAIMS_AGENT", "role_type": "ADMIN" },
   { "role_name": "CUSTOMER", "role_type": "CUSTOMER" },
-  { "role_name": "READ_ONLY", "role_type": "CUSTOMER" }
+  { "role_name": "READ_ONLY", "role_type": "CUSTOMER" },
+  { "role_name": "PARTNER", "role_type": "PARTNER" }
 ]

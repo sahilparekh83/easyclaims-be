@@ -1,3 +1,4 @@
+import logging
 from datetime import datetime, timezone
 from typing import List, Optional
 from fastapi import HTTPException
@@ -5,6 +6,7 @@ from ..db.queries.member_query import MemberQuery
 from ..db.queries.user_query import UserQuery
 from ..db.queries.plan_query import PlanQuery
 from ..db.queries.partner_query import PartnerQuery
+from ..db.queries.activity_query import ActivityQuery
 from ..db.models.member import MemberEnrollment, MemberProfile, FamilyMember, Nominee, DpdpConsent
 from ..schemas.member import (
     MemberCreate, ProfileUpdate,
@@ -13,6 +15,8 @@ from ..schemas.member import (
     ConsentCreate,
 )
 from ..constants import UserType
+
+logger = logging.getLogger(__name__)
 
 
 class MemberService:
@@ -23,10 +27,18 @@ class MemberService:
         self.partner_q = PartnerQuery()
 
     def create_member(self, data: MemberCreate) -> dict:
+        is_new_user = False
         existing = self.user_q.get_user_by_email(str(data.email))
         if existing:
+            # Block re-enrollment under the same partner
+            if data.partner_id and self.q.get_enrollment(str(existing.id), data.partner_id):
+                raise HTTPException(
+                    status_code=409,
+                    detail=f"This member ({data.email}) is already enrolled under this partner.",
+                )
             user = existing
         else:
+            is_new_user = True
             user = self.user_q.create_user(
                 email=str(data.email), name=data.name,
                 user_type=UserType.CUSTOMER, mobile_no=data.mobile_no,
@@ -49,7 +61,26 @@ class MemberService:
 
         enrollment = self.q.create_enrollment(str(user.id), data.partner_id, plan_id)
         self.q.upsert_profile(str(user.id))
+
+        if is_new_user:
+            self._send_welcome_email(user, partner)
+
         return {"user": user, "enrollment": enrollment}
+
+    def _send_welcome_email(self, user, partner) -> None:
+        try:
+            from .email_service import EmailService
+            from ..configs.common import get_settings
+            settings = get_settings()
+            login_url = f"{settings.FRONTEND_URL}/login"
+            EmailService().send_welcome_member(
+                to_email=user.email,
+                member_name=user.name or user.email,
+                partner_name=partner.name,
+                login_url=login_url,
+            )
+        except Exception:
+            logger.exception("Failed to send welcome email to %s", user.email)
 
     def list_enrollments(self, user_id: str) -> List[MemberEnrollment]:
         return self.q.list_enrollments(user_id)
@@ -71,15 +102,119 @@ class MemberService:
             raise HTTPException(status_code=404, detail="No active enrollment found")
         return e
 
-    def switch_plan(self, user_id: str, partner_id: str, plan_id: str) -> MemberEnrollment:
+    def switch_plan(self, user_id: str, partner_id: str, plan_id: str,
+                    changed_by: str = "system") -> MemberEnrollment:
         available = self.plan_q.list_for_partner(partner_id)
         available_ids = [str(p.id) for p in available]
         if plan_id not in available_ids:
             raise HTTPException(status_code=404, detail="Plan not available for this partner")
+
+        # Get current plan before switching (for history)
+        old_enrollment = self.q.get_enrollment(user_id, partner_id)
+        old_plan_id = str(old_enrollment.plan_id) if old_enrollment else None
+
         e = self.q.update_enrollment(user_id, partner_id, plan_id=plan_id)
         if not e:
             raise HTTPException(status_code=404, detail="Enrollment not found")
+
+        # Log history
+        try:
+            from ..db.queries.enrollment_history_query import EnrollmentHistoryQuery
+            EnrollmentHistoryQuery().create(
+                enrollment_id=str(e.id),
+                user_id=user_id,
+                partner_id=partner_id,
+                to_plan_id=plan_id,
+                from_plan_id=old_plan_id,
+                action="plan_changed",
+                changed_by=changed_by,
+            )
+        except Exception:
+            logger.exception("Failed to log enrollment history for user %s", user_id)
+
+        # Send email notification to member
+        try:
+            member = self.user_q.get_user_by_id(user_id)
+            old_plan = self.plan_q.get_by_id(old_plan_id) if old_plan_id else None
+            new_plan = self.plan_q.get_by_id(plan_id)
+            if member and new_plan:
+                from .email_service import EmailService
+                EmailService().send_plan_changed(
+                    to_email=member.email,
+                    member_name=member.name or member.email,
+                    old_plan=old_plan.name if old_plan else "—",
+                    new_plan=new_plan.name,
+                    changed_by=changed_by,
+                )
+        except Exception:
+            logger.exception("Failed to send plan-changed email for user %s", user_id)
+
         return e
+
+    def renew_enrollment(self, user_id: str, partner_id: str,
+                         changed_by: str = "system") -> MemberEnrollment:
+        """Extend enrollment by 1 year from today and set status=Active."""
+        from datetime import date, timedelta
+        e = self.q.get_enrollment(user_id, partner_id)
+        if not e:
+            raise HTTPException(status_code=404, detail="Enrollment not found")
+
+        new_start = date.today()
+        new_end = new_start + timedelta(days=365)
+        updated = self.q.update_enrollment(
+            user_id, partner_id,
+            status="Active",
+            start_date=new_start,
+            end_date=new_end,
+        )
+        if not updated:
+            raise HTTPException(status_code=500, detail="Failed to renew enrollment")
+
+        # Log history
+        try:
+            from ..db.queries.enrollment_history_query import EnrollmentHistoryQuery
+            EnrollmentHistoryQuery().create(
+                enrollment_id=str(updated.id),
+                user_id=user_id,
+                partner_id=partner_id,
+                to_plan_id=str(updated.plan_id),
+                from_plan_id=str(updated.plan_id),
+                action="renewed",
+                changed_by=changed_by,
+                note=f"Renewed until {new_end.isoformat()}",
+            )
+        except Exception:
+            logger.exception("Failed to log renewal history for user %s", user_id)
+
+        # Send email notification to member
+        try:
+            member = self.user_q.get_user_by_id(user_id)
+            plan = self.plan_q.get_by_id(str(updated.plan_id))
+            if member and plan:
+                from .email_service import EmailService
+                EmailService().send_from_template(
+                    to_email=member.email,
+                    slug="enrollment_renewed",
+                    context={
+                        "member_name": member.name or member.email,
+                        "plan_name": plan.name,
+                        "end_date": str(new_end),
+                    },
+                )
+                # In-app notification
+                from ..db.queries.activity_query import NotificationQuery
+                NotificationQuery().create(
+                    recipient_user_id=user_id,
+                    type="plan_renewed",
+                    title="Your plan has been renewed",
+                    body=f"Your plan '{plan.name}' has been renewed until {new_end.isoformat()}.",
+                    ref_id=str(updated.plan_id),
+                    ref_type="plan",
+                )
+        except Exception:
+            logger.exception("Failed to send renewal email for user %s", user_id)
+
+        return updated
 
     def get_profile(self, user_id: str) -> dict:
         user = self.user_q.get_user_by_id(user_id)

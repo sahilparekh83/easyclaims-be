@@ -4,6 +4,9 @@ from pydantic import BaseModel
 from ...schemas.base import ResponseModel
 from ...schemas.plan import PlanCreate, PlanUpdate
 from ...services.plan_service import PlanService
+from ...db.queries.partner_query import PartnerQuery
+from ...db.queries.member_query import MemberQuery
+from ...db.queries.user_query import UserQuery
 from ..users import _require_superadmin
 from ..plans import _plan_to_dict
 
@@ -69,4 +72,35 @@ async def unlink_partner(plan_id: UUID, partner_id: UUID, request: Request,
 @admin_plans_router.get("/{plan_id}/partners", response_model=ResponseModel)
 async def list_linked_partners(plan_id: UUID, request: Request, _=Depends(_require_superadmin)):
     partner_ids = PlanService().query.list_linked_partners(str(plan_id))
-    return ResponseModel.ok(data={"partner_ids": partner_ids})
+    pq = PartnerQuery()
+    mq = MemberQuery()
+    partners = []
+    for pid in partner_ids:
+        partner = pq.get_by_id(pid)
+        if partner:
+            # Count members enrolled on this plan under this partner
+            enrollments = mq.list_enrollments_by_plan_partner(str(plan_id), pid)
+            partners.append({
+                "id": str(partner.id),
+                "name": partner.name,
+                "partner_type": partner.partner_type,
+                "status": partner.status,
+                "member_count": len(enrollments),
+            })
+    return ResponseModel.ok(data=partners)
+
+
+@admin_plans_router.get("/{plan_id}/members", response_model=ResponseModel)
+async def list_members_on_plan(
+    plan_id: UUID, partner_id: str, request: Request, _=Depends(_require_superadmin)
+):
+    """Return members enrolled on this plan under a specific partner."""
+    mq = MemberQuery()
+    uq = UserQuery()
+    enrollments = mq.list_enrollments_by_plan_partner(str(plan_id), partner_id)
+    members = []
+    for e in enrollments:
+        user = uq.get_user_by_id(str(e.user_id))
+        if user:
+            members.append({"id": str(user.id), "name": user.name, "email": user.email})
+    return ResponseModel.ok(data=members)
