@@ -2,6 +2,7 @@ import uuid as _uuid
 from typing import Optional
 from ..models.user import User, OTPLog, AuthSession
 from ..session import session_scope
+from ...constants import UserType
 
 
 class UserQuery:
@@ -10,6 +11,39 @@ class UserQuery:
             user = (
                 session.query(User)
                 .filter(User.email.ilike(email), User.is_deleted == False)
+                .first()
+            )
+            if user:
+                session.expunge(user)
+            return user
+
+    def get_user_by_email_any(self, email: str) -> Optional[User]:
+        with session_scope() as session:
+            user = session.query(User).filter(User.email.ilike(email)).first()
+            if user:
+                session.expunge(user)
+            return user
+
+    def get_user_by_mobile(self, mobile_no: str) -> Optional[User]:
+        with session_scope() as session:
+            user = (
+                session.query(User)
+                .filter(User.mobile_no == mobile_no, User.is_deleted == False)
+                .first()
+            )
+            if user:
+                session.expunge(user)
+            return user
+
+    def get_customer_by_mobile(self, mobile_no: str) -> Optional[User]:
+        with session_scope() as session:
+            user = (
+                session.query(User)
+                .filter(
+                    User.mobile_no == mobile_no,
+                    User.user_type == UserType.CUSTOMER,
+                    User.is_deleted == False,
+                )
                 .first()
             )
             if user:

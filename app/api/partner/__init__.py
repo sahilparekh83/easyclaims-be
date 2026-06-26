@@ -1,4 +1,5 @@
 from fastapi import APIRouter
+from .ai import partner_ai_router
 from .profile import partner_profile_router
 from .plans import partner_plans_router
 from .members import partner_members_router
@@ -13,3 +14,4 @@ partner_router.include_router(partner_members_router, prefix="/members", tags=["
 partner_router.include_router(partner_dashboard_router, prefix="/dashboard", tags=["Partner - Dashboard"])
 partner_router.include_router(partner_policies_router, prefix="/policies", tags=["Partner - Policies"])
 partner_router.include_router(partner_notifications_router, prefix="/notifications", tags=["Partner - Notifications"])
+partner_router.include_router(partner_ai_router, prefix="/ai", tags=["Partner - AI"])

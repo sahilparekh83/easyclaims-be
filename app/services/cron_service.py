@@ -1,15 +1,17 @@
 """
-Daily cron jobs for plan expiry:
+Cron jobs:
   - Warn members 2 days before plan expiry
   - Mark expired enrollments + notify member, partner, admin
+  - Remind members who haven't uploaded any policy document
 """
 import logging
-from datetime import date, timedelta
+from datetime import date, timedelta, datetime, timezone
 
 from ..db.session import session_scope
 from ..db.models.member import MemberEnrollment
 from ..db.models.partner import Partner
 from ..db.models.plan import MembershipPlan
+from ..db.models.policy import Policy
 from ..db.models.user import User
 from ..db.queries.activity_query import NotificationQuery
 from ..db.queries.enrollment_history_query import EnrollmentHistoryQuery
@@ -198,6 +200,19 @@ def run_expiry_check() -> dict:
                         end_date=end_date,
                     )
 
+                # Admin notification
+                try:
+                    from .notification_helper import notify_all_admins
+                    notify_all_admins(
+                        type="plan_expired",
+                        title=f"Plan Expired — {member_name}",
+                        body=f"{member_name} ka plan '{plan_name}' {end_date} ko expire ho gaya.",
+                        ref_id=e["user_id"],
+                        ref_type="member",
+                    )
+                except Exception:
+                    pass
+
             expired += 1
         except Exception as exc:
             logger.exception("Error processing expired enrollment %s: %s", e["id"], exc)
@@ -205,3 +220,83 @@ def run_expiry_check() -> dict:
 
     logger.info("Expiry check: warned=%d, expired=%d, errors=%d", warned, expired, errors)
     return {"warned": warned, "expired": expired, "errors": errors}
+
+
+# ── Document upload reminder ───────────────────────────────────────────────────
+
+DEFAULT_UPLOAD_REMINDER_DELAY = timedelta(minutes=1)
+
+
+def _get_upload_reminder_delay() -> timedelta:
+    try:
+        from ..db.queries.system_setting_query import SystemSettingQuery
+        val = SystemSettingQuery().get("upload_reminder_delay_minutes")
+        if val:
+            return timedelta(minutes=float(val))
+    except Exception:
+        pass
+    return DEFAULT_UPLOAD_REMINDER_DELAY
+
+
+def run_document_upload_reminder() -> dict:
+    """
+    Find Active members who enrolled more than UPLOAD_REMINDER_DELAY ago
+    and have no policy uploaded yet. Send them a WhatsApp reminder.
+    """
+    from ..configs.common import get_settings
+    from ..services.whatsapp_service import WhatsAppService
+
+    settings = get_settings()
+    wa = WhatsAppService()
+    upload_url = f"{settings.FRONTEND_URL}/upload"
+
+    cutoff = datetime.now(timezone.utc) - _get_upload_reminder_delay()
+    reminded = 0
+    errors = 0
+
+    try:
+        with session_scope() as session:
+            # Enrollments older than cutoff with no policy uploaded
+            enrolled_without_docs = (
+                session.query(MemberEnrollment, User)
+                .join(User, User.id == MemberEnrollment.user_id)
+                .filter(
+                    MemberEnrollment.status == "Active",
+                    MemberEnrollment.created_at <= cutoff,
+                    ~session.query(Policy)
+                    .filter(Policy.user_id == MemberEnrollment.user_id)
+                    .exists(),
+                )
+                .all()
+            )
+            pending = [
+                {
+                    "name": u.name or "there",
+                    "mobile": u.mobile_no,
+                    "email": u.email,
+                }
+                for _, u in enrolled_without_docs
+                if u.mobile_no
+            ]
+    except Exception as exc:
+        logger.exception("Failed to query members without documents: %s", exc)
+        return {"reminded": 0, "errors": 1}
+
+    for member in pending:
+        try:
+            message = (
+                f"Hello {member['name']}! 👋\n\n"
+                "Your policy document has not been uploaded yet.\n\n"
+                "Please upload it here:\n"
+                f"{upload_url}\n\n"
+                "If you need help, just reply to this message."
+            )
+            wa.send_message(member["mobile"], message)
+            reminded += 1
+            logger.info("Upload reminder sent to %s", member["email"])
+        except Exception as exc:
+            logger.exception("Failed to send reminder to %s: %s", member["email"], exc)
+            errors += 1
+
+    logger.info("Upload reminder: reminded=%d, errors=%d", reminded, errors)
+    return {"reminded": reminded, "errors": errors}

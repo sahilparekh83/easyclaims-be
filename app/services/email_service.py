@@ -125,6 +125,12 @@ class EmailService:
             "end_date": end_date,
         })
 
+    def send_policy_active(self, to_email: str, member_name: str, policy_number: str) -> bool:
+        return self.send_from_template(to_email, "policy_active_member", {
+            "member_name": member_name,
+            "policy_number": policy_number,
+        })
+
     def send_plan_changed(self, to_email: str, member_name: str,
                           old_plan: str, new_plan: str, changed_by: str) -> bool:
         return self.send_from_template(to_email, "plan_changed", {

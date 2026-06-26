@@ -16,6 +16,8 @@ class OTPService:
         self.user_query = UserQuery()
 
     def generate_otp(self) -> str:
+        if self.settings.DEBUG:
+            return "12345"
         return str(secrets.randbelow(900000) + 100000)
 
     def hash_otp(self, otp: str) -> str:

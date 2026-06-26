@@ -15,6 +15,57 @@ from .email_service import EmailService
 logger = logging.getLogger(__name__)
 
 
+def run_ai_extraction(policy_id: str, storage_key: str, member_name: str) -> None:
+    import os, tempfile, json as _json
+    from ..agents import DocumentExtractorAgent, DocValidatorAgent
+    from ..db.queries.policy_query import PolicyQuery as PQ
+    from ..db.queries.user_query import UserQuery as UQ
+    from ..storage import get_storage as _get_storage
+
+    pq = PQ()
+    tmp_path = None
+    try:
+        pdf_bytes = _get_storage().download(storage_key)
+        with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as f:
+            f.write(pdf_bytes)
+            tmp_path = f.name
+
+        extracted = DocumentExtractorAgent().extract(tmp_path, policy_id=policy_id)
+        policy = pq.get_by_id(policy_id)
+        member = UQ().get_user_by_id(str(policy.user_id)) if policy else None
+
+        validation = DocValidatorAgent().validate(
+            extracted=extracted.model_dump(),
+            member_name=member.name if member else member_name,
+            policy_id=policy_id,
+        )
+
+        # AI extraction always moves to need_review — admin must approve/reject
+        confidence_pct = int(extracted.confidence * 100)
+
+        all_fields = extracted.model_dump(exclude={"additional_info", "confidence"})
+        fields = {k: v for k, v in all_fields.items() if v is not None}
+        fields["confidence"] = extracted.confidence
+        fields["validation_status"] = validation.status
+        fields["validation_reason"] = validation.reason
+        fields["name_match"] = validation.name_match
+
+        if extracted.additional_info:
+            try:
+                fields.update(_json.loads(extracted.additional_info))
+            except (ValueError, TypeError):
+                pass
+
+        pq.update_ai_result(policy_id, fields, confidence_pct, "need_review")
+        logger.info("AI extraction complete for policy %s — status: need_review", policy_id)
+
+    except Exception as exc:
+        logger.error("AI extraction failed for policy %s: %s", policy_id, exc)
+    finally:
+        if tmp_path and os.path.exists(tmp_path):
+            os.remove(tmp_path)
+
+
 def _dummy_extracted_fields(policy_number: str, policy_type_name: str,
                             insurer: str = None, sum_insured: int = None) -> dict:
     return {
@@ -110,6 +161,7 @@ class PolicyService:
             sum_insured=data.sum_insured,
             storage_key=key,
             file_name=safe_name,
+            status="processing",
         )
 
         # Populate dummy extracted fields until AI extraction is configured
@@ -146,12 +198,23 @@ class PolicyService:
 
             nq = NotificationQuery()
 
-            # Email + notification to member
+            # Email + WhatsApp notification to member
             if member:
                 self.email.send_policy_uploaded_member(
                     member.email, member_label,
                     policy.policy_number, policy_type_name,
                 )
+                if member.mobile_no:
+                    try:
+                        from .whatsapp_service import WhatsAppService
+                        WhatsAppService().send_message(
+                            member.mobile_no,
+                            f"Hi {member_label}! ✅\n\n"
+                            f"Your {policy_type_name} policy document has been received.\n\n"
+                            "We are verifying your document. You will be notified once it is approved."
+                        )
+                    except Exception:
+                        logger.warning("Failed to send WhatsApp upload confirmation to %s", member.mobile_no)
 
             # Email + notification to partner
             if partner_record and partner_user:
@@ -164,7 +227,7 @@ class PolicyService:
                     recipient_user_id=str(partner_record.user_id),
                     type="policy_uploaded",
                     title=f"New Policy Uploaded — {policy.policy_number}",
-                    body=f"{member_label} ({member_email}) uploaded a {policy_type_name} policy.",
+                    body=f"{member_label} uploaded a {policy_type_name} policy.",
                     ref_id=str(policy.id),
                     ref_type="policy",
                 )
@@ -187,8 +250,8 @@ class PolicyService:
                 nq.create(
                     recipient_user_id=str(admin.id),
                     type="policy_uploaded",
-                    title=f"[Admin] New Policy Upload — {policy.policy_number}",
-                    body=f"{member_label} ({member_email}) via {partner_name} uploaded a {policy_type_name} policy.",
+                    title=f"New Policy Upload — {policy.policy_number}",
+                    body=f"{member_label} via {partner_name} uploaded a {policy_type_name} policy.",
                     ref_id=str(policy.id),
                     ref_type="policy",
                 )

@@ -8,6 +8,7 @@ from .policy import Policy
 from .activity import UserActivity, PolicyFamilyMember, Notification
 from .email_template import EmailTemplate
 from .enrollment_history import EnrollmentHistory
+from .system_setting import SystemSetting
 
 __all__ = [
     "User", "OTPLog", "AuthSession", "Role", "UserRole",
@@ -18,4 +19,5 @@ __all__ = [
     "UserActivity", "PolicyFamilyMember", "Notification",
     "EmailTemplate",
     "EnrollmentHistory",
+    "SystemSetting",
 ]

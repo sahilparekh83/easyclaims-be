@@ -64,8 +64,23 @@ class MemberService:
 
         if is_new_user:
             self._send_welcome_email(user, partner)
+            self._send_welcome_whatsapp(user, partner)
 
+        self._notify_admins_new_member(user, partner)
         return {"user": user, "enrollment": enrollment}
+
+    def _notify_admins_new_member(self, user, partner) -> None:
+        try:
+            from .notification_helper import notify_all_admins
+            notify_all_admins(
+                type="member_joined",
+                title=f"New Member — {user.name or user.email}",
+                body=f"{user.name or user.email} joined via {partner.name}.",
+                ref_id=str(user.id),
+                ref_type="member",
+            )
+        except Exception:
+            logger.exception("Failed to notify admins of new member %s", user.id)
 
     def _send_welcome_email(self, user, partner) -> None:
         try:
@@ -81,6 +96,25 @@ class MemberService:
             )
         except Exception:
             logger.exception("Failed to send welcome email to %s", user.email)
+
+    def _send_welcome_whatsapp(self, user, partner) -> None:
+        if not user.mobile_no:
+            return
+        try:
+            from .whatsapp_service import WhatsAppService
+            from ..configs.common import get_settings
+            settings = get_settings()
+            upload_url = f"{settings.FRONTEND_URL}/upload"
+            message = (
+                f"Welcome to EasyClaims, {user.name or 'there'}! 🎉\n\n"
+                f"You have been enrolled under *{partner.name}*.\n\n"
+                f"To upload your insurance policy document, visit:\n"
+                f"{upload_url}\n\n"
+                f"For any queries, just send a message here."
+            )
+            WhatsAppService().send_message(user.mobile_no, message)
+        except Exception:
+            logger.exception("Failed to send welcome WhatsApp to %s", user.mobile_no)
 
     def list_enrollments(self, user_id: str) -> List[MemberEnrollment]:
         return self.q.list_enrollments(user_id)

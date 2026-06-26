@@ -20,7 +20,26 @@ class LinkPartnerBody(BaseModel):
 @admin_plans_router.get("", response_model=ResponseModel)
 async def list_plans(request: Request, skip: int = 0, limit: int = 100,
                      _=Depends(_require_superadmin)):
-    return ResponseModel.ok(data=[_plan_to_dict(p) for p in PlanService().list_all(skip=skip, limit=limit)])
+    from ...db.session import session_scope
+    from ...db.models.member import MemberEnrollment
+    from sqlalchemy import func
+
+    plans = PlanService().list_all(skip=skip, limit=limit)
+
+    with session_scope() as session:
+        counts = dict(
+            session.query(MemberEnrollment.plan_id, func.count(MemberEnrollment.id))
+            .group_by(MemberEnrollment.plan_id)
+            .all()
+        )
+
+    result = []
+    for p in plans:
+        d = _plan_to_dict(p)
+        d["member_count"] = counts.get(p.id, 0)
+        result.append(d)
+
+    return ResponseModel.ok(data=result)
 
 
 @admin_plans_router.post("", response_model=ResponseModel, status_code=201)

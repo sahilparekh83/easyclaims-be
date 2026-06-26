@@ -147,6 +147,42 @@ class PolicyQuery:
                 p.extracted_fields = fields
                 session.flush()
 
+    def update_ai_result(self, policy_id: str, extracted_fields: dict,
+                         ai_confidence: int, status: str) -> None:
+        from datetime import date
+        with session_scope() as session:
+            p = session.query(Policy).filter(
+                Policy.id == _uuid.UUID(policy_id), Policy.is_deleted == False
+            ).first()
+            if p:
+                p.extracted_fields = extracted_fields
+                p.ai_confidence = ai_confidence
+                p.status = status
+                if extracted_fields.get("start_date"):
+                    try:
+                        p.start_date = date.fromisoformat(str(extracted_fields["start_date"]))
+                    except (ValueError, TypeError):
+                        pass
+                if extracted_fields.get("end_date"):
+                    try:
+                        p.end_date = date.fromisoformat(str(extracted_fields["end_date"]))
+                    except (ValueError, TypeError):
+                        pass
+                if extracted_fields.get("policy_number"):
+                    p.policy_number = extracted_fields["policy_number"]
+                session.flush()
+
+    def update_status(self, policy_id: str, status: str) -> bool:
+        with session_scope() as session:
+            p = session.query(Policy).filter(
+                Policy.id == _uuid.UUID(policy_id), Policy.is_deleted == False
+            ).first()
+            if p:
+                p.status = status
+                session.flush()
+                return True
+            return False
+
     def soft_delete(self, policy_id: str, user_id: str) -> bool:
         with session_scope() as session:
             p = session.query(Policy).filter(

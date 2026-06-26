@@ -1,4 +1,5 @@
 import uuid
+import logging
 from typing import List
 from fastapi import HTTPException
 from ..db.queries.partner_query import PartnerQuery
@@ -6,6 +7,8 @@ from ..db.queries.user_query import UserQuery
 from ..db.models.partner import Partner
 from ..schemas.partner import PartnerCreate, PartnerUpdate
 from ..constants import UserType
+
+logger = logging.getLogger("easyclaims")
 
 
 class PartnerService:
@@ -32,15 +35,49 @@ class PartnerService:
         existing = self.user_query.get_user_by_email(str(data.email))
         if existing:
             raise HTTPException(status_code=409, detail="Email already registered")
+        existing_deleted = self.user_query.get_user_by_email_any(str(data.email))
+        if existing_deleted:
+            raise HTTPException(status_code=409, detail="Email already registered (previously deleted account)")
         user = self.user_query.create_user(
             email=str(data.email), name=data.name,
             user_type=UserType.PARTNER, mobile_no=data.mobile_no,
         )
         api_key = str(uuid.uuid4()).replace("-", "")
-        return self.query.create(
+        partner = self.query.create(
             user_id=str(user.id), name=data.name,
             partner_type=data.partner_type, city=data.city, api_key=api_key,
         )
+        self._send_welcome_notifications(user, partner)
+        return partner
+
+    def _send_welcome_notifications(self, user, partner) -> None:
+        from ..configs.common import get_settings
+        from .email_service import EmailService
+        from .whatsapp_service import WhatsAppService
+        settings = get_settings()
+        portal_url = f"{settings.FRONTEND_URL}/login"
+
+        try:
+            EmailService().send_from_template(str(user.email), "welcome_partner", {
+                "partner_name": partner.name,
+                "email": str(user.email),
+                "portal_url": portal_url,
+            })
+        except Exception:
+            logger.exception("Failed to send welcome email to partner %s", user.email)
+
+        if user.mobile_no:
+            try:
+                message = (
+                    f"Welcome to EasyClaims, {partner.name}! 🎉\n\n"
+                    f"Your partner account has been created.\n\n"
+                    f"Login at: {portal_url}\n"
+                    f"Email: {user.email}\n\n"
+                    f"For support, reply to this message."
+                )
+                WhatsAppService().send_message(user.mobile_no, message)
+            except Exception:
+                logger.exception("Failed to send welcome WhatsApp to partner %s", user.mobile_no)
 
     def update(self, partner_id: str, data: PartnerUpdate) -> Partner:
         self.get_by_id(partner_id)
