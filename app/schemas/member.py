@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import Optional, Any
 from datetime import date
 from pydantic import BaseModel, EmailStr, Field, field_validator
 import re
@@ -10,8 +10,22 @@ class MemberCreate(BaseModel):
     email: EmailStr
     name: str
     mobile_no: Optional[str] = None
+    gender: Optional[str] = None
+    address_line: Optional[str] = None
+    address_city: Optional[str] = None
+    address_state: Optional[str] = None
+    address_pin: Optional[str] = None
     partner_id: Optional[str] = None
     plan_id: Optional[str] = None
+    # New onboarding fields
+    sale_date: Optional[date] = None
+    sales_channel: Optional[str] = None
+    branch_code: Optional[str] = None
+    salesperson_name: Optional[str] = None
+    employee_code: Optional[str] = None
+    data1: Optional[str] = None
+    data2: Optional[str] = None
+    data3: Optional[str] = None
 
     @field_validator("mobile_no")
     @classmethod
@@ -20,8 +34,51 @@ class MemberCreate(BaseModel):
             raise ValueError("Invalid mobile number format")
         return v
 
+    @field_validator("gender")
+    @classmethod
+    def validate_gender(cls, v):
+        if v and v not in ("Male", "Female", "Other"):
+            raise ValueError("Gender must be Male, Female, or Other")
+        return v
+
+
+class AdminMemberUpdate(BaseModel):
+    """Admin-only: update any member field."""
+    name: Optional[str] = None
+    mobile_no: Optional[str] = None
+    gender: Optional[str] = None
+    dob: Optional[date] = None
+    address_line: Optional[str] = None
+    address_city: Optional[str] = None
+    address_state: Optional[str] = None
+    address_pin: Optional[str] = None
+    sale_date: Optional[date] = None
+    sales_channel: Optional[str] = None
+    branch_code: Optional[str] = None
+    salesperson_name: Optional[str] = None
+    employee_code: Optional[str] = None
+    data1: Optional[str] = None
+    data2: Optional[str] = None
+    data3: Optional[str] = None
+    is_active: Optional[bool] = None
+
+    @field_validator("mobile_no")
+    @classmethod
+    def validate_mobile(cls, v):
+        if v and not _MOBILE_RE.match(v):
+            raise ValueError("Invalid mobile number format")
+        return v
+
+    @field_validator("gender")
+    @classmethod
+    def validate_gender(cls, v):
+        if v and v not in ("Male", "Female", "Other"):
+            raise ValueError("Gender must be Male, Female, or Other")
+        return v
+
 
 class ProfileUpdate(BaseModel):
+    """Member self-update — kept for internal use; no longer exposed as a public endpoint."""
     name: Optional[str] = None
     mobile_no: Optional[str] = None
     gender: Optional[str] = None
@@ -57,6 +114,25 @@ class ProfileUpdate(BaseModel):
         return v
 
 
+class ChangeRequestCreate(BaseModel):
+    requested_fields: dict   # {"name": "New Name", "mobile_no": "9999999999", ...}
+    reason: Optional[str] = None
+
+
+class ChangeRequestReview(BaseModel):
+    action: str   # "approved" | "rejected"
+    admin_note: Optional[str] = None
+
+    @field_validator("action")
+    @classmethod
+    def validate_action(cls, v):
+        if v not in ("approved", "rejected"):
+            raise ValueError("action must be 'approved' or 'rejected'")
+        return v
+
+
+# Keep existing FamilyMemberCreate, FamilyMemberUpdate, NomineeCreate, NomineeUpdate,
+# ConsentCreate, PlanSwitchRequest unchanged below this line
 class FamilyMemberCreate(BaseModel):
     name: str
     relation: str

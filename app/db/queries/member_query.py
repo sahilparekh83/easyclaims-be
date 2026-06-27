@@ -1,8 +1,8 @@
 import uuid as _uuid
-from datetime import date
+from datetime import date, datetime, timezone
 from typing import Optional, List, Tuple
 from sqlalchemy import and_
-from ..models.member import MemberProfile, MemberEnrollment, FamilyMember, Nominee, DpdpConsent
+from ..models.member import MemberProfile, MemberEnrollment, FamilyMember, Nominee, DpdpConsent, MemberChangeRequest
 from ..models.user import User
 from ..session import session_scope
 from .list_helper import apply_global_filter, apply_field_filters, apply_sort, paginate
@@ -294,3 +294,51 @@ class MemberQuery:
             session.flush()
             session.expunge(c)
             return c
+
+    # ── Change Requests ──────────────────────────────────────────────────────
+    def create_change_request(self, user_id: str, requested_fields: dict, reason: str = None) -> MemberChangeRequest:
+        with session_scope() as session:
+            cr = MemberChangeRequest(
+                user_id=user_id,
+                requested_fields=requested_fields,
+                reason=reason,
+            )
+            session.add(cr)
+            session.flush()
+            session.expunge(cr)
+            return cr
+
+    def get_change_request(self, request_id: str):
+        with session_scope() as session:
+            cr = session.query(MemberChangeRequest).filter(MemberChangeRequest.id == request_id).first()
+            if cr:
+                session.expunge(cr)
+            return cr
+
+    def list_change_requests(self, user_id=None, status=None, skip=0, limit=50):
+        with session_scope() as session:
+            q = session.query(MemberChangeRequest)
+            if user_id:
+                q = q.filter(MemberChangeRequest.user_id == user_id)
+            if status:
+                q = q.filter(MemberChangeRequest.status == status)
+            total = q.count()
+            rows = q.order_by(MemberChangeRequest.created_at.desc()).offset(skip).limit(limit).all()
+            for r in rows:
+                session.expunge(r)
+            return total, rows
+
+    def update_change_request(self, request_id: str, status: str,
+                               reviewed_by: str = None, admin_note: str = None):
+        with session_scope() as session:
+            cr = session.query(MemberChangeRequest).filter(MemberChangeRequest.id == request_id).first()
+            if not cr:
+                return None
+            cr.status = status
+            cr.reviewed_by = reviewed_by
+            cr.reviewed_at = datetime.now(timezone.utc)
+            if admin_note is not None:
+                cr.admin_note = admin_note
+            session.flush()
+            session.expunge(cr)
+            return cr
