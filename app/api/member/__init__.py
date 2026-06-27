@@ -1,6 +1,7 @@
 from fastapi import APIRouter
 from .ai import member_ai_router
 from .partners import member_partners_router
+from .change_requests import member_change_requests_router
 from .plan import member_plan_router
 from .profile import member_profile_router
 from .family import member_family_router
@@ -21,3 +22,4 @@ member_router.include_router(member_policies_router, prefix="/policies", tags=["
 member_router.include_router(member_dashboard_router, prefix="/dashboard", tags=["Member - Dashboard"])
 member_router.include_router(member_notifications_router, prefix="/notifications", tags=["Member - Notifications"])
 member_router.include_router(member_ai_router, prefix="/ai", tags=["Member - AI"])
+member_router.include_router(member_change_requests_router, prefix="/change-requests", tags=["Member - Change Requests"])
