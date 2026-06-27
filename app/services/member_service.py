@@ -60,7 +60,14 @@ class MemberService:
             plan_id = str(available[0].id)
 
         enrollment = self.q.create_enrollment(str(user.id), data.partner_id, plan_id)
-        self.q.upsert_profile(str(user.id))
+        profile_fields = {}
+        for f in ("gender", "address_line", "address_city", "address_state", "address_pin",
+                  "sale_date", "sales_channel", "branch_code", "salesperson_name",
+                  "employee_code", "data1", "data2", "data3"):
+            v = getattr(data, f, None)
+            if v is not None:
+                profile_fields[f] = v
+        self.q.upsert_profile(str(user.id), **profile_fields)
 
         if is_new_user:
             self._send_welcome_email(user, partner)
@@ -271,6 +278,148 @@ class MemberService:
             self.q.upsert_profile(user_id, **profile_fields)
         return self.get_profile(user_id)
 
+    def update_member_by_admin(self, member_id: str, data, admin_id: str, ip: str = None) -> dict:
+        from .audit_service import AuditService
+        user = self.user_q.get_user_by_id(member_id)
+        if not user:
+            raise HTTPException(status_code=404, detail="Member not found")
+
+        old_user = {"name": user.name, "mobile_no": user.mobile_no, "is_active": user.is_active}
+        profile = self.q.get_profile(member_id)
+        old_profile = {
+            "gender": profile.gender if profile else None,
+            "address_line": profile.address_line if profile else None,
+            "address_city": profile.address_city if profile else None,
+            "address_state": profile.address_state if profile else None,
+            "address_pin": profile.address_pin if profile else None,
+            "sale_date": str(profile.sale_date) if profile and profile.sale_date else None,
+            "sales_channel": profile.sales_channel if profile else None,
+            "branch_code": profile.branch_code if profile else None,
+            "salesperson_name": profile.salesperson_name if profile else None,
+            "employee_code": profile.employee_code if profile else None,
+            "data1": profile.data1 if profile else None,
+            "data2": profile.data2 if profile else None,
+            "data3": profile.data3 if profile else None,
+        }
+
+        payload = data.model_dump(exclude_none=True)
+        user_fields = {k: v for k, v in payload.items() if k in ("name", "mobile_no", "is_active")}
+        profile_fields = {k: v for k, v in payload.items() if k not in ("name", "mobile_no", "is_active")}
+
+        if user_fields:
+            self.user_q.update_user(member_id, **user_fields)
+        if profile_fields:
+            self.q.upsert_profile(member_id, **profile_fields)
+
+        AuditService().log(
+            actor_id=admin_id, actor_type="admin",
+            action="member_updated",
+            entity_type="member", entity_id=member_id,
+            old_value={**old_user, **old_profile},
+            new_value=payload,
+            ip_address=ip,
+        )
+        return self.get_profile(member_id)
+
+    def create_change_request(self, user_id: str, data) -> object:
+        from .audit_service import AuditService
+        cr = self.q.create_change_request(
+            user_id=user_id,
+            requested_fields=data.requested_fields,
+            reason=data.reason,
+        )
+        # Notify all admins
+        try:
+            from .notification_helper import notify_all_admins
+            user = self.user_q.get_user_by_id(user_id)
+            notify_all_admins(
+                type="change_request",
+                title=f"Profile Change Request — {user.name or user.email}",
+                body=f"{user.name or user.email} requested changes to their profile.",
+                ref_id=str(cr.id),
+                ref_type="change_request",
+            )
+        except Exception:
+            logger.exception("Failed to notify admins of change request %s", cr.id)
+        AuditService().log(
+            actor_id=user_id, actor_type="member",
+            action="change_request_created",
+            entity_type="change_request", entity_id=str(cr.id),
+            new_value=data.requested_fields,
+        )
+        return cr
+
+    def approve_change_request(self, request_id: str, admin_id: str, admin_note: str = None, ip: str = None) -> object:
+        from .audit_service import AuditService
+        cr = self.q.get_change_request(request_id)
+        if not cr:
+            raise HTTPException(status_code=404, detail="Change request not found")
+        if cr.status != "pending":
+            raise HTTPException(status_code=400, detail="Change request already reviewed")
+
+        # Apply the changes
+        from app.schemas.member import AdminMemberUpdate
+        update_data = AdminMemberUpdate(**cr.requested_fields)
+        self.update_member_by_admin(
+            member_id=str(cr.user_id),
+            data=update_data,
+            admin_id=admin_id,
+            ip=ip,
+        )
+        updated = self.q.update_change_request(
+            request_id, status="approved", reviewed_by=admin_id, admin_note=admin_note
+        )
+        # Notify member
+        try:
+            from ..db.queries.activity_query import NotificationQuery
+            NotificationQuery().create(
+                recipient_user_id=str(cr.user_id),
+                type="change_request_approved",
+                title="Your profile change request was approved",
+                body="Your requested profile changes have been applied.",
+                ref_id=request_id,
+                ref_type="change_request",
+            )
+        except Exception:
+            logger.exception("Failed to notify member of change request approval %s", request_id)
+        AuditService().log(
+            actor_id=admin_id, actor_type="admin",
+            action="change_request_approved",
+            entity_type="change_request", entity_id=request_id,
+            new_value=cr.requested_fields,
+            ip_address=ip,
+        )
+        return updated
+
+    def reject_change_request(self, request_id: str, admin_id: str, admin_note: str = None) -> object:
+        from .audit_service import AuditService
+        cr = self.q.get_change_request(request_id)
+        if not cr:
+            raise HTTPException(status_code=404, detail="Change request not found")
+        if cr.status != "pending":
+            raise HTTPException(status_code=400, detail="Change request already reviewed")
+        updated = self.q.update_change_request(
+            request_id, status="rejected", reviewed_by=admin_id, admin_note=admin_note
+        )
+        try:
+            from ..db.queries.activity_query import NotificationQuery
+            NotificationQuery().create(
+                recipient_user_id=str(cr.user_id),
+                type="change_request_rejected",
+                title="Your profile change request was rejected",
+                body=admin_note or "Your profile change request was not approved.",
+                ref_id=request_id,
+                ref_type="change_request",
+            )
+        except Exception:
+            logger.exception("Failed to notify member of change request rejection %s", request_id)
+        AuditService().log(
+            actor_id=admin_id, actor_type="admin",
+            action="change_request_rejected",
+            entity_type="change_request", entity_id=request_id,
+        )
+        return updated
+
     def list_family(self, user_id: str) -> List[FamilyMember]:
         return self.q.list_family(user_id)
 
@@ -317,6 +466,150 @@ class MemberService:
         if not c:
             raise HTTPException(status_code=404, detail="No consent record found")
         return c
+
+    def update_member_by_admin(self, member_id: str, data, admin_id: str, ip: str = None) -> dict:
+        from .audit_service import AuditService
+        from ..schemas.member import AdminMemberUpdate
+        user = self.user_q.get_user_by_id(member_id)
+        if not user:
+            raise HTTPException(status_code=404, detail="Member not found")
+
+        old_user = {"name": user.name, "mobile_no": user.mobile_no, "is_active": user.is_active}
+        profile = self.q.get_profile(member_id)
+        old_profile = {
+            "gender": profile.gender if profile else None,
+            "address_line": profile.address_line if profile else None,
+            "address_city": profile.address_city if profile else None,
+            "address_state": profile.address_state if profile else None,
+            "address_pin": profile.address_pin if profile else None,
+            "sale_date": str(profile.sale_date) if profile and profile.sale_date else None,
+            "sales_channel": profile.sales_channel if profile else None,
+            "branch_code": profile.branch_code if profile else None,
+            "salesperson_name": profile.salesperson_name if profile else None,
+            "employee_code": profile.employee_code if profile else None,
+            "data1": profile.data1 if profile else None,
+            "data2": profile.data2 if profile else None,
+            "data3": profile.data3 if profile else None,
+        }
+
+        if isinstance(data, dict):
+            payload = {k: v for k, v in data.items() if v is not None}
+        else:
+            payload = data.model_dump(exclude_none=True)
+
+        user_fields = {k: v for k, v in payload.items() if k in ("name", "mobile_no", "is_active")}
+        profile_fields = {k: v for k, v in payload.items() if k not in ("name", "mobile_no", "is_active")}
+
+        if user_fields:
+            self.user_q.update_user(member_id, **user_fields)
+        if profile_fields:
+            self.q.upsert_profile(member_id, **profile_fields)
+
+        AuditService().log(
+            actor_id=admin_id, actor_type="admin",
+            action="member_updated",
+            entity_type="member", entity_id=member_id,
+            old_value={**old_user, **old_profile},
+            new_value=payload,
+            ip_address=ip,
+        )
+        return self.get_profile(member_id)
+
+    def create_change_request(self, user_id: str, data) -> object:
+        from .audit_service import AuditService
+        cr = self.q.create_change_request(
+            user_id=user_id,
+            requested_fields=data.requested_fields,
+            reason=data.reason,
+        )
+        try:
+            from .notification_helper import notify_all_admins
+            user = self.user_q.get_user_by_id(user_id)
+            notify_all_admins(
+                type="change_request",
+                title=f"Profile Change Request — {user.name or user.email}",
+                body=f"{user.name or user.email} requested changes to their profile.",
+                ref_id=str(cr.id),
+                ref_type="change_request",
+            )
+        except Exception:
+            logger.exception("Failed to notify admins of change request %s", cr.id)
+        AuditService().log(
+            actor_id=user_id, actor_type="member",
+            action="change_request_created",
+            entity_type="change_request", entity_id=str(cr.id),
+            new_value=data.requested_fields,
+        )
+        return cr
+
+    def approve_change_request(self, request_id: str, admin_id: str, admin_note: str = None, ip: str = None) -> object:
+        from .audit_service import AuditService
+        from ..schemas.member import AdminMemberUpdate
+        cr = self.q.get_change_request(request_id)
+        if not cr:
+            raise HTTPException(status_code=404, detail="Change request not found")
+        if cr.status != "pending":
+            raise HTTPException(status_code=400, detail="Change request already reviewed")
+
+        update_data = AdminMemberUpdate(**{k: v for k, v in cr.requested_fields.items()})
+        self.update_member_by_admin(
+            member_id=str(cr.user_id),
+            data=update_data,
+            admin_id=admin_id,
+            ip=ip,
+        )
+        updated = self.q.update_change_request(
+            request_id, status="approved", reviewed_by=admin_id, admin_note=admin_note
+        )
+        try:
+            from ..db.queries.activity_query import NotificationQuery
+            NotificationQuery().create(
+                recipient_user_id=str(cr.user_id),
+                type="change_request_approved",
+                title="Your profile change request was approved",
+                body="Your requested profile changes have been applied.",
+                ref_id=request_id,
+                ref_type="change_request",
+            )
+        except Exception:
+            logger.exception("Failed to notify member of change request approval %s", request_id)
+        AuditService().log(
+            actor_id=admin_id, actor_type="admin",
+            action="change_request_approved",
+            entity_type="change_request", entity_id=request_id,
+            new_value=cr.requested_fields,
+            ip_address=ip,
+        )
+        return updated
+
+    def reject_change_request(self, request_id: str, admin_id: str, admin_note: str = None) -> object:
+        from .audit_service import AuditService
+        cr = self.q.get_change_request(request_id)
+        if not cr:
+            raise HTTPException(status_code=404, detail="Change request not found")
+        if cr.status != "pending":
+            raise HTTPException(status_code=400, detail="Change request already reviewed")
+        updated = self.q.update_change_request(
+            request_id, status="rejected", reviewed_by=admin_id, admin_note=admin_note
+        )
+        try:
+            from ..db.queries.activity_query import NotificationQuery
+            NotificationQuery().create(
+                recipient_user_id=str(cr.user_id),
+                type="change_request_rejected",
+                title="Your profile change request was rejected",
+                body=admin_note or "Your profile change request was not approved.",
+                ref_id=request_id,
+                ref_type="change_request",
+            )
+        except Exception:
+            logger.exception("Failed to notify member of change request rejection %s", request_id)
+        AuditService().log(
+            actor_id=admin_id, actor_type="admin",
+            action="change_request_rejected",
+            entity_type="change_request", entity_id=request_id,
+        )
+        return updated
 
     def record_consent(self, user_id: str, data: ConsentCreate) -> DpdpConsent:
         return self.q.create_consent(
