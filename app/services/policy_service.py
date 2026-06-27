@@ -56,8 +56,8 @@ def run_ai_extraction(policy_id: str, storage_key: str, member_name: str) -> Non
             except (ValueError, TypeError):
                 pass
 
-        pq.update_ai_result(policy_id, fields, confidence_pct, "need_review")
-        logger.info("AI extraction complete for policy %s — status: need_review", policy_id)
+        pq.update_ai_result(policy_id, fields, confidence_pct, "active")
+        logger.info("AI extraction complete for policy %s — status: active (auto-approved)", policy_id)
 
     except Exception as exc:
         logger.error("AI extraction failed for policy %s: %s", policy_id, exc)
@@ -161,7 +161,7 @@ class PolicyService:
             sum_insured=data.sum_insured,
             storage_key=key,
             file_name=safe_name,
-            status="processing",
+            status="active",
         )
 
         # Populate dummy extracted fields until AI extraction is configured

@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime, timezone
-from sqlalchemy import Column, String, Integer, Boolean, Date, DateTime, ForeignKey, UniqueConstraint
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy import Column, String, Integer, Boolean, Date, DateTime, ForeignKey, UniqueConstraint, Text
+from sqlalchemy.dialects.postgresql import UUID, JSONB
 from ..base import Base
 
 
@@ -45,6 +45,15 @@ class MemberProfile(Base):
     channel_email = Column(Boolean, nullable=False, default=True)
     channel_whatsapp = Column(Boolean, nullable=False, default=False)
     channel_voice = Column(Boolean, nullable=False, default=False)
+    # NEW onboarding fields
+    sale_date = Column(Date, nullable=True)
+    sales_channel = Column(String, nullable=True)
+    branch_code = Column(String, nullable=True)
+    salesperson_name = Column(String, nullable=True)
+    employee_code = Column(String, nullable=True)
+    data1 = Column(String, nullable=True)
+    data2 = Column(String, nullable=True)
+    data3 = Column(String, nullable=True)
     created_at = Column(DateTime(timezone=True), default=utcnow)
     updated_at = Column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
 
@@ -53,6 +62,25 @@ class MemberProfile(Base):
         kwargs.setdefault("channel_email", True)
         kwargs.setdefault("channel_whatsapp", False)
         kwargs.setdefault("channel_voice", False)
+        super().__init__(**kwargs)
+
+
+class MemberChangeRequest(Base):
+    __tablename__ = "member_change_requests"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+    requested_fields = Column(JSONB, nullable=False)   # {"name": "New Name", "mobile_no": "9999999999"}
+    reason = Column(Text, nullable=True)
+    status = Column(String, nullable=False, default="pending")  # pending | approved | rejected
+    reviewed_by = Column(String, nullable=True)        # admin user_id as string
+    reviewed_at = Column(DateTime(timezone=True), nullable=True)
+    admin_note = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), default=utcnow)
+    updated_at = Column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+
+    def __init__(self, **kwargs):
+        kwargs.setdefault("status", "pending")
         super().__init__(**kwargs)
 
 

@@ -155,88 +155,93 @@ async def update_policy_fields(policy_id: UUID, body: dict, _=Depends(_require_s
     return ResponseModel.ok(data={"updated": True})
 
 
-@admin_policies_router.post("/{policy_id}/approve", response_model=ResponseModel)
-async def approve_policy(policy_id: UUID, _=Depends(_require_superadmin)):
-    pq = PolicyQuery()
-    uq = UserQuery()
-    policy = pq.get_by_id(str(policy_id))
-    if not policy:
-        raise HTTPException(status_code=404, detail="Policy not found")
-    if policy.status == "active":
-        raise HTTPException(status_code=400, detail="Policy already approved")
-
-    pq.update_status(str(policy_id), "active")
-
-    member = uq.get_user_by_id(str(policy.user_id))
-    if member:
-        pol_no = policy.policy_number or str(policy_id)
-        try:
-            from ...services.whatsapp_service import WhatsAppService
-            if member.mobile_no:
-                WhatsAppService().send_message(
-                    member.mobile_no,
-                    f"Hi {member.name or 'there'}! 🎉\n\n"
-                    f"Your policy *{pol_no}* has been verified and is now *Active*.\n\n"
-                    "You can view your policy details on the EasyClaims portal."
-                )
-        except Exception:
-            pass
-        try:
-            from ...services.email_service import EmailService
-            EmailService().send_policy_active(member.email, member.name or member.email, pol_no)
-        except Exception:
-            pass
-
-    member_name = member.name if member else "Member"
-    _notify_admins(
-        type="policy_approved",
-        title=f"Policy Approved — {policy.policy_number or str(policy_id)}",
-        body=f"{member_name} ki policy approve ki gayi.",
-        ref_id=str(policy_id), ref_type="policy",
-    )
-    return ResponseModel.ok(data={"status": "active"})
-
-
-@admin_policies_router.post("/{policy_id}/reject", response_model=ResponseModel)
-async def reject_policy(policy_id: UUID, _=Depends(_require_superadmin)):
-    pq = PolicyQuery()
-    uq = UserQuery()
-    policy = pq.get_by_id(str(policy_id))
-    if not policy:
-        raise HTTPException(status_code=404, detail="Policy not found")
-    if policy.status == "rejected":
-        raise HTTPException(status_code=400, detail="Policy already rejected")
-
-    pq.update_status(str(policy_id), "rejected")
-
-    member = uq.get_user_by_id(str(policy.user_id))
-    if member:
-        pol_no = policy.policy_number or str(policy_id)
-        try:
-            from ...services.whatsapp_service import WhatsAppService
-            if member.mobile_no:
-                WhatsAppService().send_message(
-                    member.mobile_no,
-                    f"Hi {member.name or 'there'}! ❌\n\n"
-                    f"Your policy *{pol_no}* could not be approved.\n\n"
-                    "Please contact your partner or EasyClaims support for assistance."
-                )
-        except Exception:
-            pass
-        try:
-            from ...services.email_service import EmailService
-            EmailService().send_policy_rejected(member.email, member.name or member.email, pol_no)
-        except Exception:
-            pass
-
-    member_name = member.name if member else "Member"
-    _notify_admins(
-        type="policy_rejected",
-        title=f"Policy Rejected — {policy.policy_number or str(policy_id)}",
-        body=f"{member_name} ki policy reject ki gayi.",
-        ref_id=str(policy_id), ref_type="policy",
-    )
-    return ResponseModel.ok(data={"status": "rejected"})
+# ---------------------------------------------------------------------------
+# APPROVE / REJECT endpoints — temporarily disabled (policies auto-activate).
+# Uncomment when manual review flow is re-enabled.
+# ---------------------------------------------------------------------------
+# @admin_policies_router.post("/{policy_id}/approve", response_model=ResponseModel)
+# async def approve_policy(policy_id: UUID, _=Depends(_require_superadmin)):
+#     pq = PolicyQuery()
+#     uq = UserQuery()
+#     policy = pq.get_by_id(str(policy_id))
+#     if not policy:
+#         raise HTTPException(status_code=404, detail="Policy not found")
+#     if policy.status == "active":
+#         raise HTTPException(status_code=400, detail="Policy already approved")
+#
+#     pq.update_status(str(policy_id), "active")
+#
+#     member = uq.get_user_by_id(str(policy.user_id))
+#     if member:
+#         pol_no = policy.policy_number or str(policy_id)
+#         try:
+#             from ...services.whatsapp_service import WhatsAppService
+#             if member.mobile_no:
+#                 WhatsAppService().send_message(
+#                     member.mobile_no,
+#                     f"Hi {member.name or 'there'}! 🎉\n\n"
+#                     f"Your policy *{pol_no}* has been verified and is now *Active*.\n\n"
+#                     "You can view your policy details on the EasyClaims portal."
+#                 )
+#         except Exception:
+#             pass
+#         try:
+#             from ...services.email_service import EmailService
+#             EmailService().send_policy_active(member.email, member.name or member.email, pol_no)
+#         except Exception:
+#             pass
+#
+#     member_name = member.name if member else "Member"
+#     _notify_admins(
+#         type="policy_approved",
+#         title=f"Policy Approved — {policy.policy_number or str(policy_id)}",
+#         body=f"{member_name} ki policy approve ki gayi.",
+#         ref_id=str(policy_id), ref_type="policy",
+#     )
+#     return ResponseModel.ok(data={"status": "active"})
+#
+#
+# @admin_policies_router.post("/{policy_id}/reject", response_model=ResponseModel)
+# async def reject_policy(policy_id: UUID, _=Depends(_require_superadmin)):
+#     pq = PolicyQuery()
+#     uq = UserQuery()
+#     policy = pq.get_by_id(str(policy_id))
+#     if not policy:
+#         raise HTTPException(status_code=404, detail="Policy not found")
+#     if policy.status == "rejected":
+#         raise HTTPException(status_code=400, detail="Policy already rejected")
+#
+#     pq.update_status(str(policy_id), "rejected")
+#
+#     member = uq.get_user_by_id(str(policy.user_id))
+#     if member:
+#         pol_no = policy.policy_number or str(policy_id)
+#         try:
+#             from ...services.whatsapp_service import WhatsAppService
+#             if member.mobile_no:
+#                 WhatsAppService().send_message(
+#                     member.mobile_no,
+#                     f"Hi {member.name or 'there'}! ❌\n\n"
+#                     f"Your policy *{pol_no}* could not be approved.\n\n"
+#                     "Please contact your partner or EasyClaims support for assistance."
+#                 )
+#         except Exception:
+#             pass
+#         try:
+#             from ...services.email_service import EmailService
+#             EmailService().send_policy_rejected(member.email, member.name or member.email, pol_no)
+#         except Exception:
+#             pass
+#
+#     member_name = member.name if member else "Member"
+#     _notify_admins(
+#         type="policy_rejected",
+#         title=f"Policy Rejected — {policy.policy_number or str(policy_id)}",
+#         body=f"{member_name} ki policy reject ki gayi.",
+#         ref_id=str(policy_id), ref_type="policy",
+#     )
+#     return ResponseModel.ok(data={"status": "rejected"})
+# ---------------------------------------------------------------------------
 
 
 @admin_policies_router.get("/{policy_id}", response_model=ResponseModel)
