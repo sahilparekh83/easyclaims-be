@@ -46,6 +46,18 @@ class PartnerService:
         partner = self.query.create(
             user_id=str(user.id), name=data.name,
             partner_type=data.partner_type, city=data.city, api_key=api_key,
+            state=data.state,
+            legal_company_name=data.legal_company_name,
+            trade_name=data.trade_name,
+            registered_address=data.registered_address,
+            pin_code=data.pin_code,
+            gstin=data.gstin,
+            pan=data.pan,
+            authorized_signatory_name=data.authorized_signatory_name,
+            designation=data.designation,
+            data_1=data.data_1,
+            data_2=data.data_2,
+            data_3=data.data_3,
         )
         self._send_welcome_notifications(user, partner)
         return partner

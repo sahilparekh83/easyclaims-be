@@ -70,6 +70,8 @@ class MemberChangeRequest(Base):
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+    entity_type = Column(String, nullable=False, default="profile")   # 'profile' | 'family_member'
+    entity_id   = Column(UUID(as_uuid=True), nullable=True)            # family_member.id when entity_type='family_member'
     requested_fields = Column(JSONB, nullable=False)   # {"name": "New Name", "mobile_no": "9999999999"}
     reason = Column(Text, nullable=True)
     status = Column(String, nullable=False, default="pending")  # pending | approved | rejected
@@ -81,6 +83,7 @@ class MemberChangeRequest(Base):
 
     def __init__(self, **kwargs):
         kwargs.setdefault("status", "pending")
+        kwargs.setdefault("entity_type", "profile")
         super().__init__(**kwargs)
 
 

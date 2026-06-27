@@ -69,9 +69,17 @@ class MemberService:
                 profile_fields[f] = v
         self.q.upsert_profile(str(user.id), **profile_fields)
 
+        plan_obj = self.plan_q.get_by_id(plan_id)
+
         if is_new_user:
             self._send_welcome_email(user, partner)
             self._send_welcome_whatsapp(user, partner)
+        else:
+            self._send_new_partner_email(user, partner)
+            self._send_new_partner_whatsapp(user, partner)
+
+        self._send_membership_card_email(user, partner, plan_obj)
+        self._send_membership_card_whatsapp(user, partner, plan_obj)
 
         self._notify_admins_new_member(user, partner)
         return {"user": user, "enrollment": enrollment}
@@ -122,6 +130,107 @@ class MemberService:
             WhatsAppService().send_message(user.mobile_no, message)
         except Exception:
             logger.exception("Failed to send welcome WhatsApp to %s", user.mobile_no)
+
+    def _send_new_partner_email(self, user, partner) -> None:
+        try:
+            from .email_service import EmailService
+            from ..configs.common import get_settings
+            settings = get_settings()
+            EmailService().send_new_partner_welcome(
+                to_email=user.email,
+                member_name=user.name or user.email,
+                partner_name=partner.name,
+                login_url=f"{settings.FRONTEND_URL}/login",
+            )
+        except Exception:
+            logger.exception("Failed to send new-partner email to %s", user.email)
+
+    def _send_new_partner_whatsapp(self, user, partner) -> None:
+        if not user.mobile_no:
+            return
+        try:
+            from .whatsapp_service import WhatsAppService
+            from ..configs.common import get_settings
+            settings = get_settings()
+            message = (
+                f"Hi {user.name or 'there'}! 👋\n\n"
+                f"You have been enrolled under a new partner on EasyClaims:\n"
+                f"*{partner.name}*\n\n"
+                f"Your existing login credentials remain the same.\n"
+                f"Log in to access your benefits: {settings.FRONTEND_URL}/login\n\n"
+                f"— EasyClaims Team"
+            )
+            WhatsAppService().send_message(user.mobile_no, message)
+        except Exception:
+            logger.exception("Failed to send new-partner WhatsApp to %s", user.mobile_no)
+
+    def _send_membership_card_email(self, user, partner, plan) -> None:
+        try:
+            from .email_service import EmailService
+            from ..configs.common import get_settings
+            settings = get_settings()
+            EmailService().send_membership_card(
+                to_email=user.email,
+                member_name=user.name or user.email,
+                member_email=user.email,
+                partner_name=partner.name,
+                partner_type=getattr(partner, "partner_type", "Partner"),
+                plan_name=plan.name,
+                plan=plan,
+                login_url=f"{settings.FRONTEND_URL}/login",
+            )
+        except Exception:
+            logger.exception("Failed to send membership card email to %s", user.email)
+
+    def _send_membership_card_whatsapp(self, user, partner, plan) -> None:
+        if not user.mobile_no:
+            return
+        try:
+            from .whatsapp_service import WhatsAppService
+            from .pdf_service import PdfService
+            from .media_service import MediaService
+            from ..configs.common import get_settings
+            settings = get_settings()
+            pdf_bytes = PdfService().generate_membership_card_pdf(
+                member_name=user.name or user.email,
+                member_email=user.email,
+                partner_name=partner.name,
+                partner_type=getattr(partner, "partner_type", "Partner"),
+                plan_name=plan.name,
+                plan=plan,
+            )
+            media_url = MediaService().save_card_pdf(pdf_bytes)
+            benefits = []
+            if getattr(plan, "benefit_aiqa", False):
+                benefits.append("• AI Health Query Assistant")
+            tc = getattr(plan, "benefit_teleconsult_sessions", 0)
+            if tc:
+                benefits.append(f"• Tele-consultation ({tc} sessions)")
+            wc = getattr(plan, "benefit_wellness_sessions", 0)
+            if wc:
+                benefits.append(f"• Wellness Sessions ({wc})")
+            if getattr(plan, "benefit_hospital_cash", False):
+                benefits.append("• Hospital Cash Benefit")
+            if getattr(plan, "benefit_emergency_assist", False):
+                benefits.append("• Emergency Assistance")
+            benefits_text = "\n".join(benefits) if benefits else ""
+            message = (
+                f"🎟 *EasyClaims Membership Card*\n\n"
+                f"👤 *Member:* {user.name or user.email}\n"
+                f"🏢 *Partner:* {partner.name}\n"
+                f"📋 *Plan:* {plan.name}\n\n"
+                f"*Benefits:*\n"
+                f"• Family: {plan.benefit_family} member(s)\n"
+                f"• Policy Slots: {plan.benefit_slots}\n"
+                f"• Claim Support: {plan.benefit_claim}\n"
+                f"{benefits_text}\n\n"
+                f"Your membership card PDF is attached above.\n"
+                f"Access your benefits: {settings.FRONTEND_URL}/login\n\n"
+                f"— EasyClaims"
+            )
+            WhatsAppService().send_media(user.mobile_no, message, media_url)
+        except Exception:
+            logger.exception("Failed to send membership card WhatsApp to %s", user.mobile_no)
 
     def list_enrollments(self, user_id: str) -> List[MemberEnrollment]:
         return self.q.list_enrollments(user_id)
@@ -319,7 +428,25 @@ class MemberService:
             new_value=payload,
             ip_address=ip,
         )
-        return self.get_profile(member_id)
+        u = self.user_q.get_user_by_id(member_id)
+        p = self.q.get_profile(member_id)
+        return {
+            "id": str(u.id), "name": u.name, "email": u.email,
+            "mobile_no": u.mobile_no, "is_active": u.is_active,
+            "gender": p.gender if p else None,
+            "address_line": p.address_line if p else None,
+            "address_city": p.address_city if p else None,
+            "address_state": p.address_state if p else None,
+            "address_pin": p.address_pin if p else None,
+            "sale_date": str(p.sale_date) if p and p.sale_date else None,
+            "sales_channel": p.sales_channel if p else None,
+            "branch_code": p.branch_code if p else None,
+            "salesperson_name": p.salesperson_name if p else None,
+            "employee_code": p.employee_code if p else None,
+            "data1": p.data1 if p else None,
+            "data2": p.data2 if p else None,
+            "data3": p.data3 if p else None,
+        }
 
     def create_change_request(self, user_id: str, data) -> object:
         from .audit_service import AuditService
@@ -424,17 +551,68 @@ class MemberService:
         return self.q.list_family(user_id)
 
     def add_family_member(self, user_id: str, data: FamilyMemberCreate) -> FamilyMember:
+        # Enforce plan family limit
+        enrollments = self.q.list_enrollments(user_id)
+        if enrollments:
+            plan = self.plan_q.get_by_id(str(enrollments[0].plan_id))
+            limit = plan.benefit_family if plan else 999
+            current = len(self.q.list_family(user_id))
+            if current >= limit:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Your plan allows a maximum of {limit} family member(s). "
+                           f"You have already added {current}."
+                )
         return self.q.create_family_member(user_id, **data.model_dump())
 
+    def _family_policy_count(self, family_member_id: str) -> int:
+        from ..db.queries.activity_query import PolicyFamilyQuery
+        return len(PolicyFamilyQuery().list_by_family_member(family_member_id))
+
     def update_family_member(self, user_id: str, member_id: str, data: FamilyMemberUpdate) -> FamilyMember:
+        count = self._family_policy_count(member_id)
+        if count > 0:
+            raise HTTPException(
+                status_code=409,
+                detail=f"This family member is linked to {count} policy/policies. "
+                       f"To change their details, please raise a change request."
+            )
         m = self.q.update_family_member(member_id, user_id, **data.model_dump(exclude_none=True))
         if not m:
             raise HTTPException(status_code=404, detail="Family member not found")
         return m
 
     def delete_family_member(self, user_id: str, member_id: str) -> None:
+        count = self._family_policy_count(member_id)
+        if count > 0:
+            raise HTTPException(
+                status_code=409,
+                detail=f"Cannot remove: this family member is linked to {count} policy/policies. "
+                       f"Contact your administrator."
+            )
         if not self.q.delete_family_member(member_id, user_id):
             raise HTTPException(status_code=404, detail="Family member not found")
+
+    def create_family_change_request(self, user_id: str, family_member_id: str,
+                                      data) -> object:
+        from .audit_service import AuditService
+        fm = self.q.get_family_member(family_member_id, user_id)
+        if not fm:
+            raise HTTPException(status_code=404, detail="Family member not found")
+        cr = self.q.create_change_request(
+            user_id=user_id,
+            requested_fields=data.requested_fields,
+            reason=data.reason,
+            entity_type="family_member",
+            entity_id=family_member_id,
+        )
+        AuditService().log(
+            actor_id=user_id, actor_type="member",
+            action="family_change_request_created",
+            entity_type="family_member", entity_id=family_member_id,
+            new_value=data.requested_fields,
+        )
+        return cr
 
     def list_nominees(self, user_id: str) -> List[Nominee]:
         return self.q.list_nominees(user_id)
@@ -513,7 +691,25 @@ class MemberService:
             new_value=payload,
             ip_address=ip,
         )
-        return self.get_profile(member_id)
+        u = self.user_q.get_user_by_id(member_id)
+        p = self.q.get_profile(member_id)
+        return {
+            "id": str(u.id), "name": u.name, "email": u.email,
+            "mobile_no": u.mobile_no, "is_active": u.is_active,
+            "gender": p.gender if p else None,
+            "address_line": p.address_line if p else None,
+            "address_city": p.address_city if p else None,
+            "address_state": p.address_state if p else None,
+            "address_pin": p.address_pin if p else None,
+            "sale_date": str(p.sale_date) if p and p.sale_date else None,
+            "sales_channel": p.sales_channel if p else None,
+            "branch_code": p.branch_code if p else None,
+            "salesperson_name": p.salesperson_name if p else None,
+            "employee_code": p.employee_code if p else None,
+            "data1": p.data1 if p else None,
+            "data2": p.data2 if p else None,
+            "data3": p.data3 if p else None,
+        }
 
     def create_change_request(self, user_id: str, data) -> object:
         from .audit_service import AuditService
@@ -544,21 +740,47 @@ class MemberService:
 
     def approve_change_request(self, request_id: str, admin_id: str, admin_note: str = None, ip: str = None) -> object:
         from .audit_service import AuditService
-        from ..schemas.member import AdminMemberUpdate
         cr = self.q.get_change_request(request_id)
         if not cr:
             raise HTTPException(status_code=404, detail="Change request not found")
         if cr.status != "pending":
             raise HTTPException(status_code=400, detail="Change request already reviewed")
 
-        update_data = AdminMemberUpdate(**{k: v for k, v in cr.requested_fields.items()})
-        self.update_member_by_admin(
-            member_id=str(cr.user_id),
-            data=update_data,
-            admin_id=admin_id,
-            ip=ip,
-        )
-        updated = self.q.update_change_request(
+        # Apply changes based on entity type
+        if cr.entity_type == "family_member" and cr.entity_id:
+            fm = self.q.get_family_member(str(cr.entity_id))
+            if fm:
+                self.q.update_family_member(
+                    str(cr.entity_id), str(cr.user_id),
+                    **cr.requested_fields
+                )
+                AuditService().log(
+                    actor_id=admin_id, actor_type="admin",
+                    action="family_member_updated_via_cr",
+                    entity_type="family_member", entity_id=str(cr.entity_id),
+                    old_value={k: getattr(fm, k, None) for k in cr.requested_fields},
+                    new_value=cr.requested_fields,
+                    ip_address=ip,
+                )
+        else:
+            # Profile change request — existing logic
+            from ..schemas.member import AdminMemberUpdate
+            update_data = AdminMemberUpdate(**{k: v for k, v in cr.requested_fields.items()})
+            self.update_member_by_admin(
+                member_id=str(cr.user_id),
+                data=update_data,
+                admin_id=admin_id,
+                ip=ip,
+            )
+            AuditService().log(
+                actor_id=admin_id, actor_type="admin",
+                action="change_request_approved",
+                entity_type="member", entity_id=str(cr.user_id),
+                new_value=cr.requested_fields,
+                ip_address=ip,
+            )
+
+        self.q.update_change_request(
             request_id, status="approved", reviewed_by=admin_id, admin_note=admin_note
         )
         try:
@@ -567,20 +789,13 @@ class MemberService:
                 recipient_user_id=str(cr.user_id),
                 type="change_request_approved",
                 title="Your profile change request was approved",
-                body="Your requested profile changes have been applied.",
+                body="Your requested changes have been applied.",
                 ref_id=request_id,
                 ref_type="change_request",
             )
         except Exception:
             logger.exception("Failed to notify member of change request approval %s", request_id)
-        AuditService().log(
-            actor_id=admin_id, actor_type="admin",
-            action="change_request_approved",
-            entity_type="change_request", entity_id=request_id,
-            new_value=cr.requested_fields,
-            ip_address=ip,
-        )
-        return updated
+        return self.q.get_change_request(request_id)
 
     def reject_change_request(self, request_id: str, admin_id: str, admin_note: str = None) -> object:
         from .audit_service import AuditService
@@ -607,7 +822,8 @@ class MemberService:
         AuditService().log(
             actor_id=admin_id, actor_type="admin",
             action="change_request_rejected",
-            entity_type="change_request", entity_id=request_id,
+            entity_type=cr.entity_type, entity_id=str(cr.entity_id or cr.user_id),
+            new_value={"admin_note": admin_note},
         )
         return updated
 

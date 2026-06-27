@@ -49,6 +49,19 @@ class EmailTemplateQuery:
             session.expunge(t)
             return t
 
+    def create_if_not_exists(self, slug: str, subject: str, html_body: str, description: str = "") -> EmailTemplate:
+        """Insert only if slug doesn't already exist. Preserves admin-edited content on restarts."""
+        with session_scope() as session:
+            existing = session.query(EmailTemplate).filter(EmailTemplate.slug == slug).first()
+            if existing:
+                session.expunge(existing)
+                return existing
+            t = EmailTemplate(slug=slug, subject=subject, html_body=html_body, description=description)
+            session.add(t)
+            session.flush()
+            session.expunge(t)
+            return t
+
     def update(self, template_id: str, **kwargs) -> Optional[EmailTemplate]:
         import uuid as _uuid
         with session_scope() as session:

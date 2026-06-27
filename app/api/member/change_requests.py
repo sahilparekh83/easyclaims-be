@@ -25,19 +25,26 @@ async def create_change_request(body: ChangeRequestCreate, request: Request, _=D
 async def list_my_change_requests(request: Request, skip: int = 0, limit: int = 20, _=Depends(_require_customer)):
     user_id = request.state.user_payload["sub"]
     total, rows = MemberQuery().list_change_requests(user_id=user_id, skip=skip, limit=limit)
+    items = []
+    for cr in rows:
+        family_member_name = None
+        if cr.entity_type == "family_member" and cr.entity_id:
+            fm = MemberQuery().get_family_member(str(cr.entity_id))
+            family_member_name = fm.name if fm else None
+        items.append({
+            "id": str(cr.id),
+            "requested_fields": cr.requested_fields,
+            "reason": cr.reason,
+            "status": cr.status,
+            "admin_note": cr.admin_note,
+            "reviewed_at": cr.reviewed_at.isoformat() if cr.reviewed_at else None,
+            "created_at": cr.created_at.isoformat() if cr.created_at else None,
+            "entity_type": cr.entity_type,
+            "entity_id": str(cr.entity_id) if cr.entity_id else None,
+            "family_member_name": family_member_name,
+        })
     return ResponseModel.ok(data={
-        "data": [
-            {
-                "id": str(cr.id),
-                "requested_fields": cr.requested_fields,
-                "reason": cr.reason,
-                "status": cr.status,
-                "admin_note": cr.admin_note,
-                "reviewed_at": cr.reviewed_at.isoformat() if cr.reviewed_at else None,
-                "created_at": cr.created_at.isoformat() if cr.created_at else None,
-            }
-            for cr in rows
-        ],
+        "data": items,
         "total": total,
         "skip": skip,
         "limit": limit,

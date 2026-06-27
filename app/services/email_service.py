@@ -32,12 +32,20 @@ class EmailService:
             return False
         return self._send(to_email, subject, body)
 
-    def _send(self, to_email: str, subject: str, html_body: str) -> bool:
-        msg = MIMEMultipart("alternative")
+    def _send(self, to_email: str, subject: str, html_body: str,
+              attachment_bytes: bytes = None, attachment_filename: str = None) -> bool:
+        from email.mime.application import MIMEApplication
+        msg = MIMEMultipart("mixed")
         msg["Subject"] = subject
         msg["From"] = self.settings.SMTP_FROM_EMAIL
         msg["To"] = to_email
-        msg.attach(MIMEText(html_body, "html"))
+        alt = MIMEMultipart("alternative")
+        alt.attach(MIMEText(html_body, "html"))
+        msg.attach(alt)
+        if attachment_bytes and attachment_filename:
+            part = MIMEApplication(attachment_bytes, _subtype="pdf")
+            part.add_header("Content-Disposition", "attachment", filename=attachment_filename)
+            msg.attach(part)
         try:
             with smtplib.SMTP(self.settings.SMTP_HOST, self.settings.SMTP_PORT) as server:
                 if self.settings.SMTP_TLS:
@@ -139,3 +147,69 @@ class EmailService:
             "new_plan": new_plan,
             "changed_by": changed_by,
         })
+
+    def send_from_template_with_attachment(self, to_email: str, slug: str, context: dict,
+                                            attachment_bytes: bytes, attachment_filename: str) -> bool:
+        tpl = self._tq.get_by_slug(slug)
+        if not tpl:
+            logger.error("Email template '%s' not found — skipping send", slug)
+            return False
+        try:
+            subject = _jinja_env.from_string(tpl.subject).render(**context)
+            body = _jinja_env.from_string(tpl.html_body).render(**context)
+        except Exception as exc:
+            logger.exception("Failed to render template '%s': %s", slug, exc)
+            return False
+        return self._send(to_email, subject, body,
+                          attachment_bytes=attachment_bytes,
+                          attachment_filename=attachment_filename)
+
+    def send_new_partner_welcome(self, to_email: str, member_name: str,
+                                  partner_name: str, login_url: str) -> bool:
+        return self.send_from_template(to_email, "welcome_member_new_partner", {
+            "member_name": member_name or to_email,
+            "partner_name": partner_name,
+            "login_url": login_url,
+        })
+
+    def send_membership_card(self, to_email: str, member_name: str, member_email: str,
+                              partner_name: str, partner_type: str, plan_name: str,
+                              plan, login_url: str) -> bool:
+        try:
+            from .pdf_service import PdfService
+            pdf_bytes = PdfService().generate_membership_card_pdf(
+                member_name=member_name or to_email,
+                member_email=member_email,
+                partner_name=partner_name,
+                partner_type=partner_type,
+                plan_name=plan_name,
+                plan=plan,
+            )
+        except Exception:
+            logger.exception("Failed to generate membership card PDF for %s", to_email)
+            pdf_bytes = None
+
+        context = {
+            "member_name": member_name or to_email,
+            "member_email": member_email,
+            "partner_name": partner_name,
+            "partner_type": partner_type,
+            "plan_name": plan_name,
+            "benefit_family": plan.benefit_family,
+            "benefit_slots": plan.benefit_slots,
+            "benefit_claim": plan.benefit_claim,
+            "benefit_aiqa": plan.benefit_aiqa,
+            "benefit_teleconsult": plan.benefit_teleconsult_sessions,
+            "benefit_hospital_cash": plan.benefit_hospital_cash,
+            "benefit_wellness": plan.benefit_wellness_sessions,
+            "benefit_emergency_assist": plan.benefit_emergency_assist,
+            "login_url": login_url,
+        }
+
+        if pdf_bytes:
+            return self.send_from_template_with_attachment(
+                to_email, "membership_card", context,
+                attachment_bytes=pdf_bytes,
+                attachment_filename="easyclaims_membership_card.pdf",
+            )
+        return self.send_from_template(to_email, "membership_card", context)

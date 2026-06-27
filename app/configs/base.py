@@ -77,6 +77,7 @@ class Settings(BaseSettings):
 
     # ── Frontend URL (used in welcome emails / links) ─────────────────────────
     FRONTEND_URL: str = os.getenv("FRONTEND_URL", "http://localhost:3000")
+    BACKEND_URL: str = os.getenv("BACKEND_URL", "http://localhost:8000")
 
     # ── Storage ───────────────────────────────────────────────────────────────
     STORAGE_BACKEND: str = os.getenv("STORAGE_BACKEND", "local")  # local | gcs | azure
@@ -148,6 +149,7 @@ class Settings(BaseSettings):
         "/auth/logout",
         "/policy-types",
         "/webhook/whatsapp/incoming",
+        "/static",
     ]
 
     # ── Gemini AI ─────────────────────────────────────────────────────────────
@@ -158,6 +160,7 @@ class Settings(BaseSettings):
     TWILIO_ACCOUNT_SID: str = os.getenv("TWILIO_ACCOUNT_SID", "")
     TWILIO_AUTH_TOKEN: str = os.getenv("TWILIO_AUTH_TOKEN", "")
     TWILIO_WHATSAPP_FROM: str = os.getenv("TWILIO_WHATSAPP_FROM", "whatsapp:+14155238886")
+    TWILIO_CONTENT_SID: str = os.getenv("TWILIO_CONTENT_SID", "")
 
     # ── Logging ───────────────────────────────────────────────────────────────
     LOG_LEVEL: str = os.getenv("LOG_LEVEL", "DEBUG").upper()

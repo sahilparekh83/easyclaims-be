@@ -16,8 +16,22 @@ from ...db.queries.plan_query import PlanQuery
 from ...db.queries.enrollment_history_query import EnrollmentHistoryQuery
 from ...db.queries.user_query import UserQuery
 from ..deps import _require_partner
+from ...db.queries.activity_query import PolicyFamilyQuery as _PFQ
 
 partner_members_router = APIRouter()
+
+
+def _family_with_counts(family_members):
+    pfq = _PFQ()
+    result = []
+    for f in family_members:
+        count = len(pfq.list_by_family_member(str(f.id)))
+        result.append({
+            "id": str(f.id), "name": f.name, "relation": f.relation,
+            "gender": f.gender, "dob": str(f.dob) if f.dob else None,
+            "coverage_type": f.coverage_type, "policy_count": count,
+        })
+    return result
 
 
 class SwitchPlanBody(BaseModel):
@@ -170,10 +184,23 @@ async def get_member(member_id: UUID, request: Request, partner=Depends(_require
             "start_date": str(enrollment.start_date) if enrollment.start_date else None,
             "end_date": str(enrollment.end_date) if enrollment.end_date else None,
         },
-        "family": [
-            {"id": str(f.id), "name": f.name, "relation": f.relation}
-            for f in family
-        ],
+        "profile": {
+            "gender": profile.gender if (profile := mq.get_profile(str(member_id))) else None,
+            "dob": str(profile.dob) if profile and profile.dob else None,
+            "address_line": profile.address_line if profile else None,
+            "address_city": profile.address_city if profile else None,
+            "address_state": profile.address_state if profile else None,
+            "address_pin": profile.address_pin if profile else None,
+            "sale_date": str(profile.sale_date) if profile and profile.sale_date else None,
+            "sales_channel": profile.sales_channel if profile else None,
+            "branch_code": profile.branch_code if profile else None,
+            "salesperson_name": profile.salesperson_name if profile else None,
+            "employee_code": profile.employee_code if profile else None,
+            "data1": profile.data1 if profile else None,
+            "data2": profile.data2 if profile else None,
+            "data3": profile.data3 if profile else None,
+        },
+        "family": _family_with_counts(family),
         "policies": policy_list,
     })
 

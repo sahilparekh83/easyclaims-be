@@ -34,6 +34,13 @@ class MemberCreate(BaseModel):
             raise ValueError("Invalid mobile number format")
         return v
 
+    @field_validator("address_pin")
+    @classmethod
+    def validate_address_pin(cls, v):
+        if v and not re.match(r"^\d{6}$", v):
+            raise ValueError("PIN code must be exactly 6 digits")
+        return v
+
     @field_validator("gender")
     @classmethod
     def validate_gender(cls, v):
@@ -67,6 +74,13 @@ class AdminMemberUpdate(BaseModel):
     def validate_mobile(cls, v):
         if v and not _MOBILE_RE.match(v):
             raise ValueError("Invalid mobile number format")
+        return v
+
+    @field_validator("address_pin")
+    @classmethod
+    def validate_address_pin(cls, v):
+        if v and not re.match(r"^\d{6}$", v):
+            raise ValueError("PIN code must be exactly 6 digits")
         return v
 
     @field_validator("gender")
@@ -128,6 +142,22 @@ class ChangeRequestReview(BaseModel):
     def validate_action(cls, v):
         if v not in ("approved", "rejected"):
             raise ValueError("action must be 'approved' or 'rejected'")
+        return v
+
+
+class FamilyChangeRequestCreate(BaseModel):
+    requested_fields: dict   # {"name": "New Name", "dob": "1990-01-01", ...}
+    reason: Optional[str] = None
+
+    @field_validator("requested_fields")
+    @classmethod
+    def validate_fields(cls, v):
+        allowed = {"name", "relation", "gender", "dob", "coverage_type"}
+        bad = set(v.keys()) - allowed
+        if bad:
+            raise ValueError(f"Fields not editable via change request: {bad}")
+        if not v:
+            raise ValueError("requested_fields cannot be empty")
         return v
 
 

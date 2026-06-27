@@ -55,10 +55,23 @@ class PartnerQuery:
             return total, rows
 
     def create(self, user_id: str, name: str, partner_type: str,
-               city: str = None, api_key: str = None) -> Partner:
+               city: str = None, api_key: str = None,
+               state: str = None, legal_company_name: str = None,
+               trade_name: str = None, registered_address: str = None,
+               pin_code: str = None, gstin: str = None, pan: str = None,
+               authorized_signatory_name: str = None, designation: str = None,
+               data_1: str = None, data_2: str = None, data_3: str = None) -> Partner:
         with session_scope() as session:
-            p = Partner(user_id=user_id, name=name, partner_type=partner_type,
-                        city=city, api_key=api_key)
+            p = Partner(
+                user_id=user_id, name=name, partner_type=partner_type,
+                city=city, api_key=api_key, state=state,
+                legal_company_name=legal_company_name, trade_name=trade_name,
+                registered_address=registered_address, pin_code=pin_code,
+                gstin=gstin, pan=pan,
+                authorized_signatory_name=authorized_signatory_name,
+                designation=designation,
+                data_1=data_1, data_2=data_2, data_3=data_3,
+            )
             session.add(p)
             session.flush()
             session.expunge(p)

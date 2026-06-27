@@ -172,6 +172,85 @@ EMAIL_TEMPLATES = [
 <p>— EasyClaims Team</p>
 </body></html>""",
     },
+    {
+        "slug": "welcome_member_new_partner",
+        "description": "Sent to an existing member when they are enrolled under a new/additional partner",
+        "subject": "You've Been Enrolled with {{ partner_name }} on EasyClaims",
+        "html_body": """<html><body style="font-family:Arial,sans-serif;color:#222;max-width:600px;margin:0 auto">
+<div style="background:#0a2257;padding:20px 28px;border-radius:10px 10px 0 0">
+  <span style="color:#fff;font-size:22px;font-weight:800;letter-spacing:1px">EasyClaims</span>
+  <span style="color:#93c5fd;font-size:13px;margin-left:12px">Your Health Benefits, Simplified</span>
+</div>
+<div style="background:#fff;border:1px solid #e2e8f0;border-top:none;padding:28px;border-radius:0 0 10px 10px">
+  <p>Hi <strong>{{ member_name }}</strong>,</p>
+  <p>You have been enrolled under a new partner on EasyClaims:</p>
+  <table style="border-collapse:collapse;width:100%;margin:16px 0;background:#f8faff;border-radius:8px;border:1px solid #dbeafe">
+    <tr><td style="padding:10px 16px;color:#555;font-size:13px;width:140px">Partner</td><td style="padding:10px 16px"><strong>{{ partner_name }}</strong></td></tr>
+  </table>
+  <p>Your existing EasyClaims account credentials remain the same — just log in to access your benefits under this new partner.</p>
+  <p>Please find your membership card attached to this email.</p>
+  <p style="margin:24px 0">
+    <a href="{{ login_url }}" style="background:#0a2257;color:#fff;padding:11px 26px;text-decoration:none;border-radius:6px;font-weight:700;font-size:14px">Log in to EasyClaims</a>
+  </p>
+  <p style="color:#888;font-size:12px">If you did not expect this enrollment, please contact your administrator.</p>
+  <p style="color:#888;font-size:12px;margin-top:24px">— EasyClaims Team</p>
+</div>
+</body></html>""",
+    },
+    {
+        "slug": "membership_card",
+        "description": "Membership card email sent after enrollment — PDF card attached, shows partner/plan/benefits",
+        "subject": "Your EasyClaims Membership Card — {{ plan_name }}",
+        "html_body": """<html><body style="font-family:Arial,sans-serif;color:#222;max-width:600px;margin:0 auto">
+<div style="background:#0a2257;padding:20px 28px;border-radius:10px 10px 0 0">
+  <div style="display:flex;justify-content:space-between;align-items:center">
+    <div>
+      <span style="color:#fff;font-size:22px;font-weight:800;letter-spacing:1px">EasyClaims</span>
+      <div style="color:#93c5fd;font-size:12px;margin-top:2px">Your Health Benefits, Simplified</div>
+    </div>
+    <div style="background:#1e40af;color:#fff;font-size:11px;font-weight:700;padding:4px 12px;border-radius:20px;letter-spacing:0.5px">MEMBERSHIP CARD</div>
+  </div>
+</div>
+<div style="background:#fff;border:1px solid #e2e8f0;border-top:none;padding:28px;border-radius:0 0 10px 10px">
+  <p>Dear <strong>{{ member_name }}</strong>,</p>
+  <p>Welcome! Your membership card is attached to this email as a PDF. Here is a summary:</p>
+  <table style="width:100%;border-collapse:collapse;background:#f0f4ff;border-radius:10px;overflow:hidden;margin:16px 0">
+    <tr style="background:#e8eeff">
+      <td style="padding:10px 16px;font-size:12px;color:#555;font-weight:600;width:160px">Member</td>
+      <td style="padding:10px 16px;font-weight:700;font-size:15px">{{ member_name }}</td>
+    </tr>
+    <tr>
+      <td style="padding:10px 16px;font-size:12px;color:#555;font-weight:600">Email</td>
+      <td style="padding:10px 16px;font-size:13px">{{ member_email }}</td>
+    </tr>
+    <tr style="background:#e8eeff">
+      <td style="padding:10px 16px;font-size:12px;color:#555;font-weight:600">Partner</td>
+      <td style="padding:10px 16px;font-weight:600">{{ partner_name }} <span style="color:#64748b;font-size:12px;font-weight:400">({{ partner_type }})</span></td>
+    </tr>
+    <tr>
+      <td style="padding:10px 16px;font-size:12px;color:#555;font-weight:600">Plan</td>
+      <td style="padding:10px 16px;font-weight:700;color:#0a2257;font-size:15px">{{ plan_name }}</td>
+    </tr>
+  </table>
+  <p style="font-size:13px;font-weight:700;color:#0a2257;margin:20px 0 10px;text-transform:uppercase;letter-spacing:0.5px">Plan Benefits</p>
+  <table style="width:100%;border-collapse:collapse;font-size:13px">
+    <tr><td style="padding:5px 12px 5px 0;color:#555;width:55%">👨‍👩‍👧 Family Members Covered</td><td style="font-weight:600">{{ benefit_family }}</td></tr>
+    <tr><td style="padding:5px 12px 5px 0;color:#555">📁 Policy Upload Slots</td><td style="font-weight:600">{{ benefit_slots }}</td></tr>
+    <tr><td style="padding:5px 12px 5px 0;color:#555">🛡 Claim Support</td><td style="font-weight:600">{{ benefit_claim }}</td></tr>
+    {% if benefit_aiqa %}<tr><td style="padding:5px 12px 5px 0;color:#555">🤖 AI Health Query Assistant</td><td style="font-weight:600;color:#16a34a">✓ Included</td></tr>{% endif %}
+    {% if benefit_teleconsult and benefit_teleconsult > 0 %}<tr><td style="padding:5px 12px 5px 0;color:#555">🩺 Tele-consultation</td><td style="font-weight:600">{{ benefit_teleconsult }} sessions</td></tr>{% endif %}
+    {% if benefit_wellness and benefit_wellness > 0 %}<tr><td style="padding:5px 12px 5px 0;color:#555">🧘 Wellness Sessions</td><td style="font-weight:600">{{ benefit_wellness }} sessions</td></tr>{% endif %}
+    {% if benefit_hospital_cash %}<tr><td style="padding:5px 12px 5px 0;color:#555">🏥 Hospital Cash Benefit</td><td style="font-weight:600;color:#16a34a">✓ Included</td></tr>{% endif %}
+    {% if benefit_emergency_assist %}<tr><td style="padding:5px 12px 5px 0;color:#555">🚨 Emergency Assistance</td><td style="font-weight:600;color:#16a34a">✓ Included</td></tr>{% endif %}
+  </table>
+  <p style="margin:28px 0 8px">
+    <a href="{{ login_url }}" style="background:#0a2257;color:#fff;padding:11px 26px;text-decoration:none;border-radius:6px;font-weight:700;font-size:14px">Access My Benefits</a>
+  </p>
+  <p style="color:#888;font-size:12px;margin-top:20px">Keep the attached PDF as your membership reference. For support, contact your partner or reply to this email.</p>
+  <p style="color:#888;font-size:12px">— EasyClaims Team</p>
+</div>
+</body></html>""",
+    },
 ]
 
 
@@ -179,7 +258,7 @@ def seed_email_templates():
     from app.db.queries.email_template_query import EmailTemplateQuery
     tq = EmailTemplateQuery()
     for tpl in EMAIL_TEMPLATES:
-        tq.upsert(
+        tq.create_if_not_exists(
             slug=tpl["slug"],
             subject=tpl["subject"],
             html_body=tpl["html_body"],

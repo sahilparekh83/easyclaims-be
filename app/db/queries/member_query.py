@@ -164,6 +164,29 @@ class MemberQuery:
             return p
 
     # ── Family ───────────────────────────────────────────────────────────────
+    def list_family_with_policy_counts(self, user_id: str) -> list:
+        from ..models.activity import PolicyFamilyMember
+        with session_scope() as session:
+            rows = session.query(FamilyMember).filter(
+                FamilyMember.user_id == user_id
+            ).order_by(FamilyMember.created_at).all()
+            result = []
+            for fm in rows:
+                count = session.query(PolicyFamilyMember).filter(
+                    PolicyFamilyMember.family_member_id == fm.id
+                ).count()
+                result.append({
+                    "id": str(fm.id),
+                    "name": fm.name,
+                    "relation": fm.relation,
+                    "gender": fm.gender,
+                    "dob": str(fm.dob) if fm.dob else None,
+                    "coverage_type": fm.coverage_type,
+                    "created_at": fm.created_at.isoformat() if fm.created_at else None,
+                    "policy_count": count,
+                })
+            return result
+
     def list_family(self, user_id: str) -> List[FamilyMember]:
         with session_scope() as session:
             rows = session.query(FamilyMember).filter(FamilyMember.user_id == user_id).all()
@@ -296,10 +319,15 @@ class MemberQuery:
             return c
 
     # ── Change Requests ──────────────────────────────────────────────────────
-    def create_change_request(self, user_id: str, requested_fields: dict, reason: str = None) -> MemberChangeRequest:
+    def create_change_request(self, user_id: str, requested_fields: dict,
+                               reason: str = None,
+                               entity_type: str = "profile",
+                               entity_id: str = None) -> MemberChangeRequest:
         with session_scope() as session:
             cr = MemberChangeRequest(
                 user_id=user_id,
+                entity_type=entity_type,
+                entity_id=entity_id,
                 requested_fields=requested_fields,
                 reason=reason,
             )
@@ -315,13 +343,16 @@ class MemberQuery:
                 session.expunge(cr)
             return cr
 
-    def list_change_requests(self, user_id=None, status=None, skip=0, limit=50):
+    def list_change_requests(self, user_id=None, status=None,
+                              entity_type=None, skip=0, limit=50):
         with session_scope() as session:
             q = session.query(MemberChangeRequest)
             if user_id:
                 q = q.filter(MemberChangeRequest.user_id == user_id)
             if status:
                 q = q.filter(MemberChangeRequest.status == status)
+            if entity_type:
+                q = q.filter(MemberChangeRequest.entity_type == entity_type)
             total = q.count()
             rows = q.order_by(MemberChangeRequest.created_at.desc()).offset(skip).limit(limit).all()
             for r in rows:

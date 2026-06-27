@@ -33,6 +33,35 @@ def _enrollment_dict(e) -> dict:
     }
 
 
+def _enrich_family(family_members):
+    pfq = PolicyFamilyQuery()
+    pq = PolicyQuery()
+    result = []
+    for f in family_members:
+        links = pfq.list_by_family_member(str(f.id))
+        linked_policies = []
+        for lnk in links:
+            policy = pq.get_by_id(str(lnk.policy_id))
+            if policy:
+                linked_policies.append({
+                    "id": str(policy.id),
+                    "policy_number": policy.policy_number,
+                    "insurer": policy.insurer,
+                    "status": policy.status,
+                })
+        result.append({
+            "id": str(f.id),
+            "name": f.name,
+            "relation": f.relation,
+            "gender": f.gender,
+            "dob": str(f.dob) if f.dob else None,
+            "coverage_type": f.coverage_type if hasattr(f, "coverage_type") else None,
+            "policy_count": len(linked_policies),
+            "linked_policies": linked_policies,
+        })
+    return result
+
+
 @admin_members_router.post("/list", response_model=ResponseModel)
 async def list_members(
     body: MemberListRequest,
@@ -244,30 +273,37 @@ async def bulk_upload_members(
 async def list_change_requests(
     request: Request,
     status: str = None,
+    member_id: str = None,
+    entity_type: str = None,
     skip: int = 0,
     limit: int = 50,
     _=Depends(_require_superadmin),
 ):
     mq = MemberQuery()
     uq = UserQuery()
-    total, rows = mq.list_change_requests(status=status, skip=skip, limit=limit)
-    result = []
+    total, rows = mq.list_change_requests(user_id=member_id, status=status, entity_type=entity_type, skip=skip, limit=limit)
+    items = []
     for cr in rows:
         user = uq.get_user_by_id(str(cr.user_id))
-        result.append({
+        family_member_name = None
+        if cr.entity_type == "family_member" and cr.entity_id:
+            fm = mq.get_family_member(str(cr.entity_id))
+            family_member_name = fm.name if fm else None
+        items.append({
             "id": str(cr.id),
-            "user_id": str(cr.user_id),
             "member_name": user.name if user else None,
             "member_email": user.email if user else None,
+            "entity_type": cr.entity_type,
+            "entity_id": str(cr.entity_id) if cr.entity_id else None,
+            "family_member_name": family_member_name,
             "requested_fields": cr.requested_fields,
             "reason": cr.reason,
             "status": cr.status,
             "admin_note": cr.admin_note,
-            "reviewed_by": cr.reviewed_by,
             "reviewed_at": cr.reviewed_at.isoformat() if cr.reviewed_at else None,
             "created_at": cr.created_at.isoformat() if cr.created_at else None,
         })
-    return ResponseModel.ok(data={"data": result, "total": total, "skip": skip, "limit": limit})
+    return ResponseModel.ok(data={"items": items, "total": total, "skip": skip, "limit": limit})
 
 
 class ReviewBody(BaseModel):
@@ -436,17 +472,16 @@ async def get_member(member_id: UUID, request: Request, _=Depends(_require_super
             "address_city": profile.address_city if profile else None,
             "address_state": profile.address_state if profile else None,
             "address_pin": profile.address_pin if profile else None,
+            "sale_date": str(profile.sale_date) if profile and profile.sale_date else None,
+            "sales_channel": profile.sales_channel if profile else None,
+            "branch_code": profile.branch_code if profile else None,
+            "salesperson_name": profile.salesperson_name if profile else None,
+            "employee_code": profile.employee_code if profile else None,
+            "data1": profile.data1 if profile else None,
+            "data2": profile.data2 if profile else None,
+            "data3": profile.data3 if profile else None,
         },
-        "family": [
-            {
-                "id": str(f.id),
-                "name": f.name,
-                "relation": f.relation,
-                "gender": f.gender,
-                "dob": str(f.dob) if f.dob else None,
-            }
-            for f in family
-        ],
+        "family": _enrich_family(family),
         "policies": policy_list,
         "nominees": [
             {

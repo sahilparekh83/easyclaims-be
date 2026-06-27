@@ -1,9 +1,11 @@
 import logging
 import logging.config
+import os
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.exceptions import RequestValidationError
+from fastapi.staticfiles import StaticFiles
 from starlette.middleware.base import BaseHTTPMiddleware
 from .api import api_router
 from .configs.common import get_settings
@@ -39,6 +41,11 @@ def create_application() -> FastAPI:
 
     app.include_router(api_router, prefix=settings.API_STR)
     logger.info("API router registered at %s", settings.API_STR)
+
+    _static_dir = os.path.join(os.path.dirname(__file__), "..", "static")
+    os.makedirs(_static_dir, exist_ok=True)
+    app.mount("/static", StaticFiles(directory=_static_dir), name="static")
+    logger.info("StaticFiles mounted at /static → %s", _static_dir)
 
     app.add_event_handler("startup", startup_handler)
     app.add_event_handler("shutdown", shutdown_handler)
