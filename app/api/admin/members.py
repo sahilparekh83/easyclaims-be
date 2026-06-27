@@ -1,10 +1,12 @@
 from uuid import UUID
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile, File, Form
 from pydantic import BaseModel
+import openpyxl, io
 from ...schemas.base import ResponseModel
-from ...schemas.member import MemberCreate
+from ...schemas.member import MemberCreate, AdminMemberUpdate, ChangeRequestCreate, ChangeRequestReview
 from ...schemas.list_request import MemberListRequest
 from ...services.member_service import MemberService
+from ...services.audit_service import AuditService
 from ...db.queries.user_query import UserQuery
 from ...db.queries.member_query import MemberQuery
 from ...db.queries.policy_query import PolicyQuery
@@ -105,6 +107,202 @@ async def create_member(body: MemberCreate, request: Request, _=Depends(_require
         "id": str(user.id), "email": user.email, "name": user.name,
         "enrollment": _enrollment_dict(enrollment),
     })
+
+
+@admin_members_router.post("/bulk-upload", response_model=ResponseModel, status_code=201)
+async def bulk_upload_members(
+    request: Request,
+    file: UploadFile = File(...),
+    partner_id: str = Form(...),
+    plan_id: str = Form(None),
+    _=Depends(_require_superadmin),
+):
+    """
+    Upload an Excel file with member rows. Expected columns (case-insensitive):
+    Sale Date | Primary Member Full Name | Gender | Primary Mobile No. | Primary Email ID |
+    Address Line1 | City | State | Pin Code | Sales Channel | Partner Branch Code |
+    Sales Person Name | Employee Code | Data 1 | Data 2 | Data 3
+    """
+    contents = await file.read()
+    try:
+        wb = openpyxl.load_workbook(filename=io.BytesIO(contents), read_only=True, data_only=True)
+    except Exception:
+        raise HTTPException(status_code=422, detail="Invalid Excel file")
+
+    ws = wb.active
+    rows = list(ws.iter_rows(values_only=True))
+    if not rows:
+        raise HTTPException(status_code=422, detail="Excel file is empty")
+
+    header = [str(c).strip().lower() if c else "" for c in rows[0]]
+    COL_MAP = {
+        "sale date": "sale_date",
+        "primary member full name": "name",
+        "gender": "gender",
+        "primary mobile no.": "mobile_no",
+        "primary mobile no": "mobile_no",
+        "primary email id": "email",
+        "address line1": "address_line",
+        "city": "address_city",
+        "state": "address_state",
+        "pin code": "address_pin",
+        "sales channel": "sales_channel",
+        "partner branch code": "branch_code",
+        "sales person name": "salesperson_name",
+        "employee code": "employee_code",
+        "data 1": "data1",
+        "data 2": "data2",
+        "data 3": "data3",
+    }
+    col_idx = {}
+    for i, h in enumerate(header):
+        mapped = COL_MAP.get(h)
+        if mapped:
+            col_idx[mapped] = i
+
+    MANDATORY = {"name", "gender", "mobile_no", "email", "address_line", "address_city", "address_state", "address_pin"}
+    missing_cols = MANDATORY - set(col_idx.keys())
+    if missing_cols:
+        raise HTTPException(status_code=422, detail=f"Missing mandatory columns: {missing_cols}")
+
+    svc = MemberService()
+    admin_id = request.state.user_id if hasattr(request.state, "user_id") else "admin"
+    ip = request.client.host if request.client else None
+    results = {"created": [], "skipped": [], "errors": []}
+
+    for row_num, row in enumerate(rows[1:], start=2):
+        def cell(field, _row=row):
+            idx = col_idx.get(field)
+            if idx is None:
+                return None
+            v = _row[idx]
+            return str(v).strip() if v is not None else None
+
+        email = cell("email")
+        name = cell("name")
+        mobile = cell("mobile_no")
+        gender = cell("gender")
+        addr = cell("address_line")
+        city = cell("address_city")
+        state = cell("address_state")
+        pin = cell("address_pin")
+
+        if not email:
+            results["skipped"].append({"row": row_num, "reason": "empty email"})
+            continue
+
+        missing_mandatory = [f for f, v in [("name", name), ("gender", gender), ("mobile_no", mobile),
+                                              ("address_line", addr), ("city", city), ("state", state), ("pin_code", pin)] if not v]
+        if missing_mandatory:
+            results["errors"].append({"row": row_num, "email": email, "reason": f"Missing: {missing_mandatory}"})
+            continue
+
+        import datetime as _dt
+        sale_date_raw = cell("sale_date")
+        sale_date = None
+        if sale_date_raw:
+            try:
+                sale_date = _dt.date.fromisoformat(sale_date_raw)
+            except Exception:
+                pass
+
+        try:
+            member_data = MemberCreate(
+                email=email, name=name, mobile_no=mobile, gender=gender,
+                address_line=addr, address_city=city, address_state=state, address_pin=pin,
+                partner_id=partner_id, plan_id=plan_id,
+                sale_date=sale_date,
+                sales_channel=cell("sales_channel"),
+                branch_code=cell("branch_code"),
+                salesperson_name=cell("salesperson_name"),
+                employee_code=cell("employee_code"),
+                data1=cell("data1"),
+                data2=cell("data2"),
+                data3=cell("data3"),
+            )
+            result = svc.create_member(member_data)
+            results["created"].append({"row": row_num, "email": email, "id": str(result["user"].id)})
+        except HTTPException as e:
+            results["skipped"].append({"row": row_num, "email": email, "reason": e.detail})
+        except Exception as e:
+            results["errors"].append({"row": row_num, "email": email, "reason": str(e)})
+
+    AuditService().log(
+        actor_id=admin_id, actor_type="admin",
+        action="bulk_upload",
+        entity_type="member",
+        note=f"Bulk upload: {len(results['created'])} created, {len(results['skipped'])} skipped, {len(results['errors'])} errors",
+        ip_address=ip,
+    )
+    return ResponseModel.ok(data={
+        "total_rows": len(rows) - 1,
+        **results,
+    })
+
+
+@admin_members_router.get("/change-requests", response_model=ResponseModel)
+async def list_change_requests(
+    request: Request,
+    status: str = None,
+    skip: int = 0,
+    limit: int = 50,
+    _=Depends(_require_superadmin),
+):
+    mq = MemberQuery()
+    uq = UserQuery()
+    total, rows = mq.list_change_requests(status=status, skip=skip, limit=limit)
+    result = []
+    for cr in rows:
+        user = uq.get_user_by_id(str(cr.user_id))
+        result.append({
+            "id": str(cr.id),
+            "user_id": str(cr.user_id),
+            "member_name": user.name if user else None,
+            "member_email": user.email if user else None,
+            "requested_fields": cr.requested_fields,
+            "reason": cr.reason,
+            "status": cr.status,
+            "admin_note": cr.admin_note,
+            "reviewed_by": cr.reviewed_by,
+            "reviewed_at": cr.reviewed_at.isoformat() if cr.reviewed_at else None,
+            "created_at": cr.created_at.isoformat() if cr.created_at else None,
+        })
+    return ResponseModel.ok(data={"data": result, "total": total, "skip": skip, "limit": limit})
+
+
+class ReviewBody(BaseModel):
+    admin_note: str = None
+
+
+@admin_members_router.post("/change-requests/{request_id}/approve", response_model=ResponseModel)
+async def approve_change_request(request_id: str, body: ReviewBody, request: Request, _=Depends(_require_superadmin)):
+    admin_id = request.state.user_id if hasattr(request.state, "user_id") else "admin"
+    ip = request.client.host if request.client else None
+    svc = MemberService()
+    cr = svc.approve_change_request(request_id, admin_id=admin_id, admin_note=body.admin_note, ip=ip)
+    return ResponseModel.ok(data={"status": cr.status})
+
+
+@admin_members_router.post("/change-requests/{request_id}/reject", response_model=ResponseModel)
+async def reject_change_request(request_id: str, body: ReviewBody, request: Request, _=Depends(_require_superadmin)):
+    admin_id = request.state.user_id if hasattr(request.state, "user_id") else "admin"
+    svc = MemberService()
+    cr = svc.reject_change_request(request_id, admin_id=admin_id, admin_note=body.admin_note)
+    return ResponseModel.ok(data={"status": cr.status})
+
+
+@admin_members_router.patch("/{member_id}", response_model=ResponseModel)
+async def update_member(
+    member_id: UUID,
+    body: AdminMemberUpdate,
+    request: Request,
+    _=Depends(_require_superadmin),
+):
+    admin_id = request.state.user_id if hasattr(request.state, "user_id") else "admin"
+    ip = request.client.host if request.client else None
+    svc = MemberService()
+    result = svc.update_member_by_admin(str(member_id), body, admin_id=admin_id or "admin", ip=ip)
+    return ResponseModel.ok(data=result)
 
 
 @admin_members_router.patch("/{member_id}/plan", response_model=ResponseModel)
