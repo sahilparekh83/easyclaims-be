@@ -133,8 +133,25 @@ class EmailService:
             "end_date": end_date,
         })
 
+    def send_policy_expiry_warning(self, to_email: str, member_name: str,
+                                    policy_number: str, policy_type: str,
+                                    end_date: str, days_left: int) -> bool:
+        return self.send_from_template(to_email, "policy_expiry_warning", {
+            "member_name": member_name,
+            "policy_number": policy_number,
+            "policy_type": policy_type,
+            "end_date": end_date,
+            "days_left": days_left,
+        })
+
     def send_policy_active(self, to_email: str, member_name: str, policy_number: str) -> bool:
         return self.send_from_template(to_email, "policy_active_member", {
+            "member_name": member_name,
+            "policy_number": policy_number,
+        })
+
+    def send_policy_rejected(self, to_email: str, member_name: str, policy_number: str) -> bool:
+        return self.send_from_template(to_email, "policy_rejected_member", {
             "member_name": member_name,
             "policy_number": policy_number,
         })

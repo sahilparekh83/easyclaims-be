@@ -222,6 +222,205 @@ def run_expiry_check() -> dict:
     return {"warned": warned, "expired": expired, "errors": errors}
 
 
+# ── Policy expiry warning ─────────────────────────────────────────────────────
+
+DEFAULT_POLICY_EXPIRY_WARNING_DAYS = 7
+
+
+def _get_policy_expiry_warning_days() -> int:
+    try:
+        from ..db.queries.system_setting_query import SystemSettingQuery
+        val = SystemSettingQuery().get("policy_expiry_warning_days")
+        if val:
+            return int(val)
+    except Exception:
+        pass
+    return DEFAULT_POLICY_EXPIRY_WARNING_DAYS
+
+
+def run_policy_expiry_check() -> dict:
+    """
+    Find active policies expiring in exactly N days (from admin settings).
+    Send email + WhatsApp alert to the primary member.
+    """
+    from .whatsapp_service import WhatsAppService
+    from ..db.models.policy_type import PolicyType
+
+    email_svc = EmailService()
+    wa = WhatsAppService()
+    nq = NotificationQuery()
+    days = _get_policy_expiry_warning_days()
+    target_date = date.today() + timedelta(days=days)
+
+    alerted = 0
+    errors = 0
+
+    try:
+        with session_scope() as session:
+            rows = (
+                session.query(Policy, User, PolicyType)
+                .join(User, User.id == Policy.user_id)
+                .join(PolicyType, PolicyType.id == Policy.policy_type_id)
+                .filter(
+                    Policy.end_date == target_date,
+                    Policy.status == "active",
+                    Policy.is_deleted == False,
+                    User.is_deleted == False,
+                )
+                .all()
+            )
+            data = [
+                {
+                    "policy_id": str(p.id),
+                    "policy_number": p.policy_number,
+                    "end_date": str(p.end_date),
+                    "user_id": str(u.id),
+                    "user_email": u.email,
+                    "user_name": u.name or u.email,
+                    "user_mobile": u.mobile_no,
+                    "policy_type": pt.name,
+                }
+                for p, u, pt in rows
+            ]
+    except Exception as exc:
+        logger.exception("Failed to query expiring policies: %s", exc)
+        return {"alerted": 0, "errors": 1}
+
+    for d in data:
+        try:
+            email_svc.send_policy_expiry_warning(
+                to_email=d["user_email"],
+                member_name=d["user_name"],
+                policy_number=d["policy_number"],
+                policy_type=d["policy_type"],
+                end_date=d["end_date"],
+                days_left=days,
+            )
+
+            if d["user_mobile"]:
+                try:
+                    wa.send_message(
+                        d["user_mobile"],
+                        f"Hi {d['user_name']}! ⚠️\n\n"
+                        f"Your *{d['policy_type']}* policy (*{d['policy_number']}*) "
+                        f"is expiring in {days} day(s) on *{d['end_date']}*.\n\n"
+                        "Please renew your policy to avoid a lapse in coverage."
+                    )
+                except Exception:
+                    logger.warning("WhatsApp failed for policy expiry alert: %s", d["policy_id"])
+
+            nq.create(
+                recipient_user_id=d["user_id"],
+                type="policy_expiry_warning",
+                title=f"Policy Expiring Soon — {d['policy_number']}",
+                body=f"Your {d['policy_type']} policy expires in {days} day(s) on {d['end_date']}.",
+                ref_id=d["policy_id"],
+                ref_type="policy",
+            )
+
+            alerted += 1
+        except Exception as exc:
+            logger.exception("Error sending policy expiry alert for %s: %s", d["policy_id"], exc)
+            errors += 1
+
+    logger.info("Policy expiry check: alerted=%d, errors=%d", alerted, errors)
+    return {"alerted": alerted, "errors": errors}
+
+
+# ── Policy status auto-expire ─────────────────────────────────────────────────
+
+def run_policy_status_update() -> dict:
+    """
+    Find active policies whose end_date has passed and mark them as expired.
+    """
+    today = date.today()
+    expired = 0
+    errors = 0
+
+    try:
+        with session_scope() as session:
+            expired_policies = (
+                session.query(Policy)
+                .filter(
+                    Policy.end_date < today,
+                    Policy.status == "active",
+                    Policy.is_deleted == False,
+                )
+                .all()
+            )
+            policy_ids = [str(p.id) for p in expired_policies]
+    except Exception as exc:
+        logger.exception("Failed to query policies for status update: %s", exc)
+        return {"expired": 0, "errors": 1}
+
+    from ..db.queries.policy_query import PolicyQuery as PQ
+    pq = PQ()
+    nq = NotificationQuery()
+
+    from .whatsapp_service import WhatsAppService
+    from ..db.models.policy_type import PolicyType
+    from ..configs.common import get_settings
+    wa = WhatsAppService()
+    upload_url = f"{get_settings().FRONTEND_URL}/upload"
+
+    for policy_id in policy_ids:
+        try:
+            pq.update_status(policy_id, "expired")
+
+            with session_scope() as session:
+                policy = session.query(Policy).filter(Policy.id == policy_id).first()
+                member = session.query(User).filter(User.id == policy.user_id).first() if policy else None
+                pt = session.query(PolicyType).filter(PolicyType.id == policy.policy_type_id).first() if policy else None
+
+                if policy and member:
+                    pol_no = policy.policy_number or policy_id
+                    pt_name = pt.name if pt else "Insurance"
+                    member_name = member.name or "there"
+
+                    nq.create(
+                        recipient_user_id=str(policy.user_id),
+                        type="policy_expired",
+                        title=f"Policy Expired — {pol_no}",
+                        body=f"Your {pt_name} policy {pol_no} has expired. Please upload your renewal document.",
+                        ref_id=policy_id,
+                        ref_type="policy",
+                    )
+
+                    if member.mobile_no:
+                        try:
+                            wa.send_message(
+                                member.mobile_no,
+                                f"Hi {member_name}! 🔔\n\n"
+                                f"Your *{pt_name}* policy (*{pol_no}*) has expired.\n\n"
+                                "Please upload your renewed policy document to maintain continuous coverage:\n"
+                                f"{upload_url}\n\n"
+                                "Need help? Just reply to this message."
+                            )
+                        except Exception:
+                            logger.warning("WhatsApp failed for expired policy %s", policy_id)
+
+                    try:
+                        EmailService().send_policy_expiry_warning(
+                            to_email=member.email,
+                            member_name=member_name,
+                            policy_number=pol_no,
+                            policy_type=pt_name,
+                            end_date=str(policy.end_date),
+                            days_left=0,
+                        )
+                    except Exception:
+                        logger.warning("Email failed for expired policy %s", policy_id)
+
+            expired += 1
+            logger.info("Policy %s marked as expired", policy_id)
+        except Exception as exc:
+            logger.exception("Error expiring policy %s: %s", policy_id, exc)
+            errors += 1
+
+    logger.info("Policy status update: expired=%d, errors=%d", expired, errors)
+    return {"expired": expired, "errors": errors}
+
+
 # ── Document upload reminder ───────────────────────────────────────────────────
 
 DEFAULT_UPLOAD_REMINDER_DELAY = timedelta(minutes=1)

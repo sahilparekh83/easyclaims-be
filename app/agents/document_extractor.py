@@ -1,7 +1,14 @@
-from typing import Optional
+from typing import Optional, List
 from pydantic import BaseModel
 from .base import BaseAgent
 from .prompts import DOCUMENT_EXTRACTOR
+
+
+class ExtractedFamilyMember(BaseModel):
+    name: str
+    relation: str
+    dob: Optional[str] = None
+    gender: Optional[str] = None
 
 
 class ExtractedPolicy(BaseModel):
@@ -13,6 +20,7 @@ class ExtractedPolicy(BaseModel):
     end_date: Optional[str] = None
     confidence: float = 0.0
     additional_info: Optional[str] = None  # JSON string — parsed after extraction
+    family_members: Optional[List[ExtractedFamilyMember]] = None
 
 
 class DocumentExtractorAgent(BaseAgent):

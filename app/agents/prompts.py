@@ -10,10 +10,20 @@ Required fields:
 - end_date (policy end date / expiry date, YYYY-MM-DD format)
 - confidence (0.0 to 1.0 based on how clearly the data was found)
 
+Also extract all family/dependent members covered under this policy into "family_members" as a list.
+Look for: insured members table, family floater member list, nominee details, covered persons section,
+or any person whose name appears alongside waiting period / pre-existing disease details (e.g. "NUPUR initial waiting period").
+For each member (excluding the primary insured), extract:
+- name (full name)
+- relation (e.g. "Spouse", "Son", "Daughter", "Father", "Mother")
+- dob (date of birth in YYYY-MM-DD format, if available, else null)
+- gender (Male/Female/Other, if available, else null)
+If no dependents are listed, return an empty list.
+
 Also extract ALL other information from the document into "additional_info" as a JSON-encoded string.
 This string should contain a flat key-value object with everything relevant:
 premium, coverage type, room rent, waiting period, exclusions, co-payment, network hospitals,
-NCB, IDV, claim process, helpline, riders, sub-limits, maternity, daycare, insured members —
+NCB, IDV, claim process, helpline, riders, sub-limits, maternity, daycare —
 whatever applies to this policy type. Use snake_case key names. Omit null values.
 Example: "{\"premium\": \"Rs. 12,500/year\", \"room_rent\": \"Single Private AC Room\"}"
 
@@ -36,8 +46,10 @@ Validate:
 
 Status rules:
 - "pass"   → all three checks pass
-- "review" → 1-2 checks failed or confidence is low
-- "reject" → document_type_valid is false OR policy is clearly expired
+- "review" → document_type_valid is true BUT name_match failed or not_expired is uncertain
+- "reject" → document_type_valid is false (receipts, invoices, IDs, bank statements, premium acknowledgements, etc. are NOT valid insurance policies) OR policy is clearly expired
+
+IMPORTANT: Payment receipts, premium acknowledgements, and any non-policy documents must always get document_type_valid: false and status: "reject".
 
 Return only JSON.
 """
