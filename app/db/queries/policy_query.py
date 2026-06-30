@@ -169,7 +169,17 @@ class PolicyQuery:
                     except (ValueError, TypeError):
                         pass
                 if extracted_fields.get("policy_number"):
-                    p.policy_number = extracted_fields["policy_number"]
+                    extracted_num = extracted_fields["policy_number"]
+                    conflict = session.query(Policy).filter(
+                        Policy.policy_number == extracted_num,
+                        Policy.id != p.id,
+                    ).first()
+                    if not conflict:
+                        p.policy_number = extracted_num
+                    elif conflict.is_deleted:
+                        # Soft-deleted policy is squatting the number — free it up
+                        conflict.policy_number = f"DEL-{conflict.id}"
+                        p.policy_number = extracted_num
                 session.flush()
 
     def update_status(self, policy_id: str, status: str) -> bool:
@@ -191,6 +201,9 @@ class PolicyQuery:
             if not p:
                 return False
             p.is_deleted = True
+            # Free up the policy number so re-uploads of the same doc don't conflict
+            if p.policy_number:
+                p.policy_number = f"DEL-{p.id}"
             return True
 
     # ── kept for backward compat (services still call these) ─────────────────
