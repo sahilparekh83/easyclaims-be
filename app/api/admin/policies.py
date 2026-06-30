@@ -44,6 +44,8 @@ def _policy_dict(p, member_name=None, member_email=None,
         "file_name": p.file_name,
         "has_file": bool(p.storage_key),
         "extracted_fields": p.extracted_fields or {},
+        "previous_policy_id": str(p.previous_policy_id) if p.previous_policy_id else None,
+        "renewal_confidence": p.renewal_confidence,
         "created_at": p.created_at.isoformat() if p.created_at else None,
     }
 
@@ -274,6 +276,24 @@ async def update_policy_fields(policy_id: UUID, body: dict, _=Depends(_require_s
 #     )
 #     return ResponseModel.ok(data={"status": "rejected"})
 # ---------------------------------------------------------------------------
+
+
+@admin_policies_router.post("/{policy_id}/confirm-renewal", response_model=ResponseModel)
+async def confirm_renewal(policy_id: UUID, _=Depends(_require_superadmin)):
+    pq = PolicyQuery()
+    ok = pq.confirm_renewal(str(policy_id))
+    if not ok:
+        raise HTTPException(status_code=400, detail="No pending renewal found for this policy")
+    return ResponseModel.ok(data={"renewed": True})
+
+
+@admin_policies_router.post("/{policy_id}/dismiss-renewal", response_model=ResponseModel)
+async def dismiss_renewal(policy_id: UUID, _=Depends(_require_superadmin)):
+    pq = PolicyQuery()
+    ok = pq.dismiss_renewal(str(policy_id))
+    if not ok:
+        raise HTTPException(status_code=404, detail="Policy not found")
+    return ResponseModel.ok(data={"dismissed": True})
 
 
 @admin_policies_router.get("/{policy_id}", response_model=ResponseModel)

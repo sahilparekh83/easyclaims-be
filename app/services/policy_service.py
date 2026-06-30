@@ -56,8 +56,38 @@ def run_ai_extraction(policy_id: str, storage_key: str, member_name: str) -> Non
             except (ValueError, TypeError):
                 pass
 
-        pq.update_ai_result(policy_id, fields, confidence_pct, "active")
-        logger.info("AI extraction complete for policy %s — status: active (auto-approved)", policy_id)
+        # Determine status based on validation result
+        if validation.status == "reject" or not validation.document_type_valid:
+            final_status = "rejected"
+        elif validation.status == "review" or not validation.name_match:
+            final_status = "need_review"
+        else:
+            final_status = "active"
+
+        pq.update_ai_result(policy_id, fields, confidence_pct, final_status)
+        logger.info("AI extraction complete for policy %s — status: %s", policy_id, final_status)
+
+        # Notify member if document rejected
+        if final_status == "rejected" and member:
+            pol_no = policy.policy_number or policy_id
+            try:
+                from .whatsapp_service import WhatsAppService
+                if member.mobile_no:
+                    WhatsAppService().send_message(
+                        member.mobile_no,
+                        f"Hi {member.name or 'there'}! ❌\n\n"
+                        f"Your uploaded document for policy *{pol_no}* could not be verified.\n\n"
+                        f"Reason: {validation.reason or 'Document does not appear to be a valid insurance policy.'}\n\n"
+                        "Please upload a valid insurance policy document."
+                    )
+            except Exception:
+                logger.warning("Failed to send rejection WhatsApp for policy %s", policy_id)
+            try:
+                EmailService().send_policy_rejected(
+                    member.email, member.name or member.email, pol_no
+                )
+            except Exception:
+                logger.warning("Failed to send rejection email for policy %s", policy_id)
 
         # Build family member list — prefer structured field, fallback to nominee in additional_info
         family_members = list(extracted.family_members or [])
@@ -73,6 +103,7 @@ def run_ai_extraction(policy_id: str, storage_key: str, member_name: str) -> Non
                 pass
 
         _sync_family_members(policy.user_id, policy_id, family_members)
+        _detect_and_link_renewal(policy, extracted, pq)
 
     except Exception as exc:
         logger.error("AI extraction failed for policy %s: %s", policy_id, exc)
@@ -155,6 +186,43 @@ def _sync_family_members(user_id, policy_id: str, extracted_members: list) -> No
                 pass  # already linked
     except Exception as exc:
         logger.warning("Failed to sync family members for user %s: %s", user_id, exc)
+
+
+def _detect_and_link_renewal(policy, extracted, pq) -> None:
+    from datetime import date
+    try:
+        candidate = pq.find_renewal_candidate(
+            str(policy.user_id), str(policy.policy_type_id), str(policy.id)
+        )
+        if not candidate:
+            return
+
+        new_start = extracted.start_date
+        old_end = candidate.end_date
+
+        confidence = None
+        if new_start and old_end:
+            try:
+                ns = date.fromisoformat(str(new_start)) if isinstance(new_start, str) else new_start
+                delta = abs((ns - old_end).days)
+                if delta <= 7:
+                    confidence = "high"
+                elif delta <= 30:
+                    confidence = "low"
+            except (ValueError, TypeError):
+                pass
+
+        if confidence is None:
+            return
+
+        mark_renewed = confidence == "high"
+        pq.link_renewal(str(policy.id), str(candidate.id), confidence, mark_renewed)
+        logger.info(
+            "Renewal detected for policy %s — previous: %s, confidence: %s",
+            policy.id, candidate.id, confidence,
+        )
+    except Exception as exc:
+        logger.warning("Renewal detection failed for policy %s: %s", policy.id, exc)
 
 
 def _gen_policy_number() -> str:
