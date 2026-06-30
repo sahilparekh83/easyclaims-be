@@ -1,11 +1,13 @@
 import logging
+from typing import Optional
 from uuid import UUID
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, UploadFile, File, Form
 from fastapi.responses import Response
 from ...schemas.base import ResponseModel
 from ...storage import get_storage
 from ...schemas.list_request import PolicyListRequest
-from ...services.policy_service import PolicyService
+from ...schemas.policy import PolicyCreate
+from ...services.policy_service import PolicyService, run_ai_extraction
 from ...db.queries.policy_query import PolicyQuery
 from ...db.queries.user_query import UserQuery
 from ...db.queries.partner_query import PartnerQuery
@@ -112,6 +114,36 @@ async def list_policies(
         "total": total,
         "skip": body.skip,
         "limit": body.limit,
+    })
+
+
+@admin_policies_router.post("/upload", response_model=ResponseModel, status_code=201)
+async def admin_upload_policy(
+    request: Request,
+    background_tasks: BackgroundTasks,
+    user_id: str = Form(...),
+    partner_id: str = Form(...),
+    policy_type_id: str = Form(...),
+    insurer: Optional[str] = Form(None),
+    sum_insured: Optional[int] = Form(None),
+    file: UploadFile = File(...),
+    _=Depends(_require_superadmin),
+):
+    """Admin upload a policy for any member — triggers real AI extraction."""
+    data = PolicyCreate(policy_type_id=policy_type_id, insurer=insurer, sum_insured=sum_insured)
+    svc = PolicyService()
+    policy = await svc.upload_policy(user_id, partner_id, data, file)
+    uq = UserQuery()
+    member = uq.get_user_by_id(user_id)
+    member_name = member.name if member else ""
+    background_tasks.add_task(run_ai_extraction, str(policy.id), policy.storage_key, member_name)
+    pt = svc.get_policy_type(str(policy.policy_type_id))
+    return ResponseModel.ok(data={
+        "id": str(policy.id),
+        "policy_number": policy.policy_number,
+        "status": policy.status,
+        "policy_type": pt.name if pt else None,
+        "member_name": member.name if member else None,
     })
 
 

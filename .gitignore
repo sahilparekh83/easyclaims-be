@@ -24,3 +24,7 @@ htmlcov/
 # Local databases
 *.sqlite3
 *.db
+
+# Runtime-generated directories
+static/
+uploads/

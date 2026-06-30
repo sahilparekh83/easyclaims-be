@@ -59,6 +59,21 @@ def run_ai_extraction(policy_id: str, storage_key: str, member_name: str) -> Non
         pq.update_ai_result(policy_id, fields, confidence_pct, "active")
         logger.info("AI extraction complete for policy %s — status: active (auto-approved)", policy_id)
 
+        # Build family member list — prefer structured field, fallback to nominee in additional_info
+        family_members = list(extracted.family_members or [])
+        if not family_members and extracted.additional_info:
+            try:
+                extra = _json.loads(extracted.additional_info)
+                nominee_name = extra.get("nominee_name") or extra.get("insured_member_2_name")
+                nominee_rel = extra.get("nominee_relationship_with_policyholder") or extra.get("insured_member_2_relation")
+                if nominee_name and nominee_rel and nominee_rel.upper() not in ("SELF", "PRIMARY"):
+                    from ..agents.document_extractor import ExtractedFamilyMember
+                    family_members.append(ExtractedFamilyMember(name=nominee_name, relation=nominee_rel))
+            except (ValueError, TypeError):
+                pass
+
+        _sync_family_members(policy.user_id, policy_id, family_members)
+
     except Exception as exc:
         logger.error("AI extraction failed for policy %s: %s", policy_id, exc)
     finally:
@@ -85,6 +100,61 @@ def _dummy_extracted_fields(policy_number: str, policy_type_name: str,
         "Maternity Benefit": "Not detected",
         "AI Extraction Status": "Dummy (AI not configured)",
     }
+
+
+def _normalize_relation(relation: str) -> str:
+    mapping = {
+        "wife": "Spouse", "husband": "Spouse", "spouse": "Spouse",
+        "son": "Son", "boy": "Son",
+        "daughter": "Daughter", "girl": "Daughter",
+        "father": "Father", "dad": "Father",
+        "mother": "Mother", "mom": "Mother",
+        "brother": "Brother", "sister": "Sister",
+        "self": "Self", "primary": "Self",
+    }
+    return mapping.get(relation.strip().lower(), relation.title())
+
+
+def _sync_family_members(user_id, policy_id: str, extracted_members: list) -> None:
+    from ..db.queries.member_query import MemberQuery
+    from ..db.queries.activity_query import PolicyFamilyQuery
+    from datetime import date
+    mq = MemberQuery()
+    pfq = PolicyFamilyQuery()
+    try:
+        existing = mq.list_family(str(user_id))
+        existing_by_name = {fm.name.strip().lower(): fm for fm in existing}
+
+        for em in extracted_members:
+            name = (em.name or "").strip()
+            relation = _normalize_relation(em.relation or "")
+            if not name or relation == "Self":
+                continue
+
+            fm = existing_by_name.get(name.lower())
+            if not fm:
+                dob = None
+                if em.dob:
+                    try:
+                        dob = date.fromisoformat(em.dob)
+                    except (ValueError, TypeError):
+                        pass
+                fm = mq.create_family_member(
+                    user_id=str(user_id),
+                    name=name,
+                    relation=relation,
+                    gender=em.gender,
+                    dob=dob,
+                )
+                existing_by_name[name.lower()] = fm
+                logger.info("Auto-added family member '%s' (%s) for user %s", name, relation, user_id)
+
+            try:
+                pfq.link(policy_id, str(fm.id))
+            except ValueError:
+                pass  # already linked
+    except Exception as exc:
+        logger.warning("Failed to sync family members for user %s: %s", user_id, exc)
 
 
 def _gen_policy_number() -> str:
