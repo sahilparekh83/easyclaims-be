@@ -27,6 +27,8 @@ class Policy(Base):
     storage_key = Column(String, nullable=True)   # {partner_id}/{user_id}/{policy_id}/{file_name}
     file_name = Column(String, nullable=True)
     extracted_fields = Column(JSONB, nullable=True, default=dict)
+    previous_policy_id = Column(UUID(as_uuid=True), ForeignKey("policies.id"), nullable=True)
+    renewal_confidence = Column(String, nullable=True)  # 'high' | 'low' | None
     is_deleted = Column(Boolean, nullable=False, default=False)
     created_at = Column(DateTime(timezone=True), default=utcnow)
     updated_at = Column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)

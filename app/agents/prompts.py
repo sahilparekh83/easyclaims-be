@@ -46,8 +46,10 @@ Validate:
 
 Status rules:
 - "pass"   → all three checks pass
-- "review" → 1-2 checks failed or confidence is low
-- "reject" → document_type_valid is false OR policy is clearly expired
+- "review" → document_type_valid is true BUT name_match failed or not_expired is uncertain
+- "reject" → document_type_valid is false (receipts, invoices, IDs, bank statements, premium acknowledgements, etc. are NOT valid insurance policies) OR policy is clearly expired
+
+IMPORTANT: Payment receipts, premium acknowledgements, and any non-policy documents must always get document_type_valid: false and status: "reject".
 
 Return only JSON.
 """

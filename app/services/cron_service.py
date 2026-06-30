@@ -357,21 +357,59 @@ def run_policy_status_update() -> dict:
     pq = PQ()
     nq = NotificationQuery()
 
+    from .whatsapp_service import WhatsAppService
+    from ..db.models.policy_type import PolicyType
+    from ..configs.common import get_settings
+    wa = WhatsAppService()
+    upload_url = f"{get_settings().FRONTEND_URL}/upload"
+
     for policy_id in policy_ids:
         try:
             pq.update_status(policy_id, "expired")
 
             with session_scope() as session:
                 policy = session.query(Policy).filter(Policy.id == policy_id).first()
-                if policy:
+                member = session.query(User).filter(User.id == policy.user_id).first() if policy else None
+                pt = session.query(PolicyType).filter(PolicyType.id == policy.policy_type_id).first() if policy else None
+
+                if policy and member:
+                    pol_no = policy.policy_number or policy_id
+                    pt_name = pt.name if pt else "Insurance"
+                    member_name = member.name or "there"
+
                     nq.create(
                         recipient_user_id=str(policy.user_id),
                         type="policy_expired",
-                        title="Policy Expired",
-                        body=f"Your policy {policy.policy_number} has expired.",
+                        title=f"Policy Expired — {pol_no}",
+                        body=f"Your {pt_name} policy {pol_no} has expired. Please upload your renewal document.",
                         ref_id=policy_id,
                         ref_type="policy",
                     )
+
+                    if member.mobile_no:
+                        try:
+                            wa.send_message(
+                                member.mobile_no,
+                                f"Hi {member_name}! 🔔\n\n"
+                                f"Your *{pt_name}* policy (*{pol_no}*) has expired.\n\n"
+                                "Please upload your renewed policy document to maintain continuous coverage:\n"
+                                f"{upload_url}\n\n"
+                                "Need help? Just reply to this message."
+                            )
+                        except Exception:
+                            logger.warning("WhatsApp failed for expired policy %s", policy_id)
+
+                    try:
+                        EmailService().send_policy_expiry_warning(
+                            to_email=member.email,
+                            member_name=member_name,
+                            policy_number=pol_no,
+                            policy_type=pt_name,
+                            end_date=str(policy.end_date),
+                            days_left=0,
+                        )
+                    except Exception:
+                        logger.warning("Email failed for expired policy %s", policy_id)
 
             expired += 1
             logger.info("Policy %s marked as expired", policy_id)

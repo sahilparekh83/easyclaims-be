@@ -206,6 +206,72 @@ class PolicyQuery:
                 p.policy_number = f"DEL-{p.id}"
             return True
 
+    def find_renewal_candidate(self, user_id: str, policy_type_id: str,
+                               exclude_policy_id: str) -> Optional[Policy]:
+        """Return the most recent non-deleted policy for this user+type (excluding the new one)."""
+        with session_scope() as session:
+            p = (
+                session.query(Policy)
+                .filter(
+                    Policy.user_id == _uuid.UUID(str(user_id)),
+                    Policy.policy_type_id == _uuid.UUID(str(policy_type_id)),
+                    Policy.id != _uuid.UUID(str(exclude_policy_id)),
+                    Policy.is_deleted == False,
+                    Policy.status != "renewed",
+                )
+                .order_by(Policy.end_date.desc().nullslast(), Policy.created_at.desc())
+                .first()
+            )
+            if p:
+                session.expunge(p)
+            return p
+
+    def link_renewal(self, new_policy_id: str, previous_policy_id: str,
+                     confidence: str, mark_previous_renewed: bool) -> None:
+        with session_scope() as session:
+            new = session.query(Policy).filter(Policy.id == _uuid.UUID(new_policy_id)).first()
+            if new:
+                new.previous_policy_id = _uuid.UUID(previous_policy_id)
+                new.renewal_confidence = confidence
+                if confidence == "low":
+                    new.status = "renewal_pending"
+            if mark_previous_renewed:
+                old = session.query(Policy).filter(Policy.id == _uuid.UUID(previous_policy_id)).first()
+                if old:
+                    old.status = "renewed"
+            session.flush()
+
+    def confirm_renewal(self, policy_id: str) -> bool:
+        """Admin confirms a low-confidence renewal — mark old policy as renewed."""
+        with session_scope() as session:
+            new = session.query(Policy).filter(
+                Policy.id == _uuid.UUID(policy_id), Policy.is_deleted == False
+            ).first()
+            if not new or not new.previous_policy_id:
+                return False
+            new.renewal_confidence = "high"
+            new.status = "active"
+            old = session.query(Policy).filter(Policy.id == new.previous_policy_id).first()
+            if old:
+                old.status = "renewed"
+            session.flush()
+            return True
+
+    def dismiss_renewal(self, policy_id: str) -> bool:
+        """Admin dismisses renewal detection — treat as a fresh policy."""
+        with session_scope() as session:
+            p = session.query(Policy).filter(
+                Policy.id == _uuid.UUID(policy_id), Policy.is_deleted == False
+            ).first()
+            if not p:
+                return False
+            p.previous_policy_id = None
+            p.renewal_confidence = None
+            if p.status == "renewal_pending":
+                p.status = "active"
+            session.flush()
+            return True
+
     # ── kept for backward compat (services still call these) ─────────────────
 
     def list_by_partner(self, partner_id: str, skip: int = 0, limit: int = 100) -> List[Policy]:
