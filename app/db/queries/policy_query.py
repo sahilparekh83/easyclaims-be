@@ -168,6 +168,13 @@ class PolicyQuery:
                         p.end_date = date.fromisoformat(str(extracted_fields["end_date"]))
                     except (ValueError, TypeError):
                         pass
+                if extracted_fields.get("insurer_name") and not p.insurer:
+                    p.insurer = extracted_fields["insurer_name"]
+                if extracted_fields.get("sum_insured") and not p.sum_insured:
+                    try:
+                        p.sum_insured = int(float(extracted_fields["sum_insured"]))
+                    except (ValueError, TypeError):
+                        pass
                 if extracted_fields.get("policy_number"):
                     extracted_num = extracted_fields["policy_number"]
                     conflict = session.query(Policy).filter(
