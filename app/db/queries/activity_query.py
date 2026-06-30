@@ -167,3 +167,20 @@ class NotificationQuery:
                 Notification.recipient_user_id == user_id,
                 Notification.is_read == False,
             ).count()
+
+    def count_by_type(self, user_id: str, types: list) -> int:
+        with session_scope() as session:
+            return session.query(Notification).filter(
+                Notification.recipient_user_id == user_id,
+                Notification.is_read == False,
+                Notification.type.in_(types),
+            ).count()
+
+    def mark_read_by_type(self, user_id: str, type: str) -> int:
+        with session_scope() as session:
+            count = session.query(Notification).filter(
+                Notification.recipient_user_id == user_id,
+                Notification.is_read == False,
+                Notification.type == type,
+            ).update({"is_read": True})
+        return count

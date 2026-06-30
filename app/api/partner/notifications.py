@@ -20,6 +20,24 @@ def _notif_dict(n) -> dict:
     }
 
 
+@partner_notifications_router.get("/badge-counts", response_model=ResponseModel)
+async def badge_counts(request: Request, partner=Depends(_require_partner)):
+    """Return per-section unread badge counts for the partner sidebar."""
+    nq = NotificationQuery()
+    user_id = str(partner.user_id)
+    members_count = nq.count_by_type(user_id, ["new_member"])
+    total = nq.unread_count(user_id)
+    return ResponseModel.ok(data={"members": members_count, "total": total})
+
+
+@partner_notifications_router.patch("/mark-read-by-type", response_model=ResponseModel)
+async def mark_read_by_type(type: str, request: Request, partner=Depends(_require_partner)):
+    """Mark all unread notifications of a given type as read."""
+    nq = NotificationQuery()
+    count = nq.mark_read_by_type(str(partner.user_id), type)
+    return ResponseModel.ok(data={"marked_read": count})
+
+
 @partner_notifications_router.get("", response_model=ResponseModel)
 async def list_notifications(
     request: Request,

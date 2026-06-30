@@ -132,6 +132,16 @@ async def create_member(body: MemberCreate, request: Request, _=Depends(_require
     result = svc.create_member(body)
     user = result["user"]
     enrollment = result["enrollment"]
+    if body.partner_id:
+        from ...services.notification_helper import notify_partner
+        notify_partner(
+            partner_id=body.partner_id,
+            type="new_member",
+            title=f"New member added: {user.name}",
+            body=f"A new member ({user.email}) has been enrolled under your account.",
+            ref_id=str(user.id),
+            ref_type="member",
+        )
     return ResponseModel.ok(data={
         "id": str(user.id), "email": user.email, "name": user.name,
         "enrollment": _enrollment_dict(enrollment),
@@ -143,7 +153,7 @@ async def bulk_upload_members(
     request: Request,
     file: UploadFile = File(...),
     partner_id: str = Form(...),
-    plan_id: str = Form(None),
+    plan_id: str = Form(...),
     _=Depends(_require_superadmin),
 ):
     """
@@ -165,23 +175,35 @@ async def bulk_upload_members(
 
     header = [str(c).strip().lower() if c else "" for c in rows[0]]
     COL_MAP = {
-        "sale date": "sale_date",
-        "primary member full name": "name",
+        # name variants
+        "primary member full name": "name", "full name": "name", "name": "name",
+        "member name": "name",
+        # email variants
+        "primary email id": "email", "email id": "email", "email": "email",
+        # mobile variants
+        "primary mobile no.": "mobile_no", "primary mobile no": "mobile_no",
+        "mobile number": "mobile_no", "mobile no": "mobile_no",
+        "mobile no.": "mobile_no", "mobile": "mobile_no",
+        "phone": "mobile_no", "phone number": "mobile_no",
+        # gender
         "gender": "gender",
-        "primary mobile no.": "mobile_no",
-        "primary mobile no": "mobile_no",
-        "primary email id": "email",
-        "address line1": "address_line",
+        # address variants
+        "address line1": "address_line", "address line 1": "address_line",
+        "address": "address_line", "address line": "address_line",
+        # city / state / pin
         "city": "address_city",
         "state": "address_state",
-        "pin code": "address_pin",
+        "pin code": "address_pin", "pin": "address_pin",
+        "pincode": "address_pin", "postal code": "address_pin",
+        # optional fields
+        "sale date": "sale_date",
         "sales channel": "sales_channel",
-        "partner branch code": "branch_code",
-        "sales person name": "salesperson_name",
+        "partner branch code": "branch_code", "branch code": "branch_code",
+        "sales person name": "salesperson_name", "salesperson name": "salesperson_name",
         "employee code": "employee_code",
-        "data 1": "data1",
-        "data 2": "data2",
-        "data 3": "data3",
+        "data 1": "data1", "data1": "data1",
+        "data 2": "data2", "data2": "data2",
+        "data 3": "data3", "data3": "data3",
     }
     col_idx = {}
     for i, h in enumerate(header):
@@ -189,7 +211,7 @@ async def bulk_upload_members(
         if mapped:
             col_idx[mapped] = i
 
-    MANDATORY = {"name", "gender", "mobile_no", "email", "address_line", "address_city", "address_state", "address_pin"}
+    MANDATORY = {"name", "mobile_no", "email"}
     missing_cols = MANDATORY - set(col_idx.keys())
     if missing_cols:
         raise HTTPException(status_code=422, detail=f"Missing mandatory columns: {missing_cols}")
@@ -220,8 +242,7 @@ async def bulk_upload_members(
             results["skipped"].append({"row": row_num, "reason": "empty email"})
             continue
 
-        missing_mandatory = [f for f, v in [("name", name), ("gender", gender), ("mobile_no", mobile),
-                                              ("address_line", addr), ("city", city), ("state", state), ("pin_code", pin)] if not v]
+        missing_mandatory = [f for f, v in [("name", name), ("mobile_no", mobile)] if not v]
         if missing_mandatory:
             results["errors"].append({"row": row_num, "email": email, "reason": f"Missing: {missing_mandatory}"})
             continue
@@ -263,6 +284,16 @@ async def bulk_upload_members(
         note=f"Bulk upload: {len(results['created'])} created, {len(results['skipped'])} skipped, {len(results['errors'])} errors",
         ip_address=ip,
     )
+    if results["created"] and partner_id:
+        from ...services.notification_helper import notify_partner
+        notify_partner(
+            partner_id=partner_id,
+            type="new_member",
+            title=f"{len(results['created'])} new member(s) added via bulk upload",
+            body=f"{len(results['created'])} member(s) were enrolled under your account.",
+            ref_id=partner_id,
+            ref_type="partner",
+        )
     return ResponseModel.ok(data={
         "total_rows": len(rows) - 1,
         **results,

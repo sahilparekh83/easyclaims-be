@@ -3,8 +3,10 @@ import re
 from uuid import UUID
 import openpyxl
 from openpyxl.styles import PatternFill, Font
-from fastapi import APIRouter, Depends, File, Request, UploadFile
+from fastapi import APIRouter, Depends, File, Form, Request, UploadFile
 from fastapi.responses import StreamingResponse
+from pydantic import BaseModel
+from typing import Optional
 from ...schemas.base import ResponseModel
 from ...schemas.partner import PartnerCreate, PartnerUpdate
 from ...schemas.list_request import PartnerListRequest, MemberListRequest, PolicyListRequest
@@ -54,11 +56,14 @@ def _partner_dict(p, user=None) -> dict:
 def _enrich(partners: list) -> list:
     uq = UserQuery()
     mq = MemberQuery()
+    from ...db.queries.activity_query import NotificationQuery
+    nq = NotificationQuery()
     result = []
     for p in partners:
         user = uq.get_user_by_id(str(p.user_id))
         d = _partner_dict(p, user)
         d["member_count"] = mq.count_by_partner(str(p.id))
+        d["unread_notification_count"] = nq.unread_count(str(p.user_id))
         result.append(d)
     return result
 
@@ -87,6 +92,14 @@ async def list_partners(
 @admin_partners_router.post("", response_model=ResponseModel, status_code=201)
 async def create_partner(body: PartnerCreate, request: Request, _=Depends(_require_superadmin)):
     p = PartnerService().create(body)
+    if body.plan_ids:
+        from ...services.plan_service import PlanService
+        ps = PlanService()
+        for plan_id in body.plan_ids:
+            try:
+                ps.link_partner(plan_id, str(p.id))
+            except Exception:
+                pass
     user = UserQuery().get_user_by_id(str(p.user_id))
     return ResponseModel.ok(data=_partner_dict(p, user))
 
@@ -184,6 +197,7 @@ def _row_to_dict(row, col_idx: dict) -> dict:
 async def bulk_upload_partners(
     request: Request,
     file: UploadFile = File(...),
+    plan_ids: Optional[str] = Form(None),
     _=Depends(_require_superadmin),
 ):
     """
@@ -238,6 +252,16 @@ async def bulk_upload_partners(
                 data_3=rd.get("data_3"),
             )
             p = svc.create(partner_data)
+            if plan_ids:
+                from ...services.plan_service import PlanService
+                ps = PlanService()
+                for pid in plan_ids.split(","):
+                    pid = pid.strip()
+                    if pid:
+                        try:
+                            ps.link_partner(pid, str(p.id))
+                        except Exception:
+                            pass
             results["created"].append({"row": row_num, "email": rd["email"], "id": str(p.id)})
         except HTTPException as e:
             results["skipped"].append({"row": row_num, "email": rd.get("email"), "reason": e.detail})
@@ -415,6 +439,53 @@ async def partner_plans(partner_id: UUID, request: Request, _=Depends(_require_s
     return ResponseModel.ok(data=[_plan_to_dict(p) for p in plans])
 
 
+@admin_partners_router.get("/{partner_id}/plans-overview", response_model=ResponseModel)
+async def partner_plans_overview(partner_id: UUID, request: Request, _=Depends(_require_superadmin)):
+    """All active plans with linked status and member count for this partner."""
+    from ...db.models.plan import MembershipPlan
+    from ...db.models.partner import PartnerPlan
+    from ...db.models.member import MemberEnrollment
+    from ...db.session import session_scope
+    from sqlalchemy import func
+
+    with session_scope() as session:
+        all_plans = session.query(MembershipPlan).filter(
+            MembershipPlan.status == "Active",
+            MembershipPlan.is_deleted == False,
+        ).order_by(MembershipPlan.name).all()
+
+        linked_ids = {
+            str(row.plan_id)
+            for row in session.query(PartnerPlan).filter(
+                PartnerPlan.partner_id == partner_id
+            ).all()
+        }
+
+        # member count per plan for this partner in one query
+        counts = dict(
+            session.query(MemberEnrollment.plan_id, func.count(MemberEnrollment.id))
+            .filter(MemberEnrollment.partner_id == partner_id)
+            .group_by(MemberEnrollment.plan_id)
+            .all()
+        )
+
+        result = []
+        for p in all_plans:
+            result.append({
+                "id": str(p.id),
+                "name": p.name,
+                "plan_type": p.plan_type,
+                "status": p.status,
+                "price": float(p.price) if p.price else None,
+                "cycle": p.cycle,
+                "description": getattr(p, "tagline", None) or getattr(p, "info_text", None),
+                "linked": str(p.id) in linked_ids,
+                "member_count": counts.get(p.id, 0),
+            })
+
+    return ResponseModel.ok(data=result)
+
+
 @admin_partners_router.post("/{partner_id}/members/list", response_model=ResponseModel)
 async def list_partner_members(
     partner_id: UUID, body: MemberListRequest, request: Request, _=Depends(_require_superadmin)
@@ -448,6 +519,322 @@ async def list_partner_members(
             "family_count": len(family),
         })
     return ResponseModel.ok(data={"data": result, "total": total, "skip": body.skip, "limit": body.limit})
+
+
+@admin_partners_router.get("/{partner_id}/notifications", response_model=ResponseModel)
+async def list_partner_notifications(
+    partner_id: UUID,
+    request: Request,
+    skip: int = 0,
+    limit: int = 50,
+    _=Depends(_require_superadmin),
+):
+    """Admin: list notifications sent to a specific partner."""
+    pq = PartnerQuery()
+    partner = pq.get_by_id(str(partner_id))
+    if not partner:
+        raise HTTPException(status_code=404, detail="Partner not found")
+    from ...db.queries.activity_query import NotificationQuery
+    nq = NotificationQuery()
+    total, notifs = nq.list_for_user(str(partner.user_id), skip=skip, limit=limit)
+    unread_count = nq.unread_count(str(partner.user_id))
+    return ResponseModel.ok(data={
+        "data": [
+            {
+                "id": str(n.id),
+                "type": n.type,
+                "title": n.title,
+                "body": n.body,
+                "is_read": n.is_read,
+                "created_at": n.created_at.isoformat() if n.created_at else None,
+            }
+            for n in notifs
+        ],
+        "total": total,
+        "unread_count": unread_count,
+        "skip": skip,
+        "limit": limit,
+    })
+
+
+@admin_partners_router.post("/{partner_id}/members", response_model=ResponseModel, status_code=201)
+async def admin_add_member_to_partner(partner_id: UUID, request: Request, _=Depends(_require_superadmin)):
+    """Admin adds a new member to a specific partner."""
+    import json as _json
+    from ...schemas.member import MemberCreate
+    from ...services.member_service import MemberService
+    body_bytes = await request.body()
+    data = _json.loads(body_bytes)
+    body = MemberCreate(**data)
+    body.partner_id = str(partner_id)
+    result = MemberService().create_member(body)
+    user = result["user"]
+    enrollment = result["enrollment"]
+    from ...services.notification_helper import notify_partner
+    notify_partner(
+        partner_id=str(partner_id),
+        type="new_member",
+        title=f"New member added: {user.name}",
+        body=f"A new member ({user.email}) has been enrolled under your account.",
+        ref_id=str(user.id),
+        ref_type="member",
+    )
+    return ResponseModel.ok(data={
+        "id": str(user.id), "email": user.email, "name": user.name,
+        "enrollment": {
+            "plan_id": str(enrollment.plan_id),
+            "status": enrollment.status,
+            "end_date": str(enrollment.end_date),
+        },
+    })
+
+
+_MEMBER_COL_MAP = {
+    "email": "email", "email id": "email",
+    "name": "name", "full name": "name",
+    "mobile": "mobile_no", "mobile number": "mobile_no", "mobile no": "mobile_no",
+    "gender": "gender",
+    "address": "address_line", "address line": "address_line",
+    "city": "address_city",
+    "state": "address_state",
+    "pin": "address_pin", "pin code": "address_pin", "pincode": "address_pin",
+    "sale date": "sale_date",
+    "sales channel": "sales_channel",
+    "branch code": "branch_code",
+    "salesperson": "salesperson_name", "salesperson name": "salesperson_name",
+    "employee code": "employee_code",
+    "data 1": "data1", "data1": "data1",
+    "data 2": "data2", "data2": "data2",
+    "data 3": "data3", "data3": "data3",
+}
+
+_MEMBER_MANDATORY = {"email", "name", "mobile_no"}
+_MEMBER_MOB_RE = re.compile(r"^\+?[\d\s\-()]{7,15}$")
+_MEMBER_PIN_RE = re.compile(r"^\d{6}$")
+
+
+def _validate_member_row(rd: dict) -> list:
+    errors = []
+    for f in _MEMBER_MANDATORY:
+        if not rd.get(f):
+            errors.append(f"{f.replace('_', ' ').title()} is required")
+    mob = rd.get("mobile_no", "")
+    if mob and not _MEMBER_MOB_RE.match(mob):
+        errors.append("Invalid Mobile Number format")
+    pin = rd.get("address_pin", "")
+    if pin and not _MEMBER_PIN_RE.match(str(pin)):
+        errors.append("Invalid PIN Code — must be 6 digits")
+    gender = rd.get("gender", "")
+    if gender and gender not in ("Male", "Female", "Other"):
+        errors.append("Gender must be Male, Female, or Other")
+    return errors
+
+
+def _parse_member_excel(contents: bytes):
+    wb = openpyxl.load_workbook(filename=io.BytesIO(contents), read_only=True, data_only=True)
+    ws = wb.active
+    rows = list(ws.iter_rows(values_only=True))
+    wb.close()
+    if not rows:
+        raise HTTPException(status_code=422, detail="Excel file is empty")
+    header = [str(c).strip().lower() if c else "" for c in rows[0]]
+    col_idx = {_MEMBER_COL_MAP[h]: i for i, h in enumerate(header) if h in _MEMBER_COL_MAP}
+    missing = _MEMBER_MANDATORY - set(col_idx.keys())
+    if missing:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Missing mandatory columns: {', '.join(sorted(missing))}"
+        )
+    return rows[0], rows[1:], col_idx
+
+
+def _member_row_to_dict(row, col_idx: dict) -> dict:
+    def cell(field):
+        idx = col_idx.get(field)
+        if idx is None:
+            return None
+        v = row[idx] if idx < len(row) else None
+        return str(v).strip() if v is not None else None
+    return {field: cell(field) for field in list(_MEMBER_COL_MAP.values())}
+
+
+@admin_partners_router.post("/{partner_id}/members/bulk-upload", response_model=ResponseModel)
+async def admin_bulk_upload_members_to_partner(
+    partner_id: UUID,
+    file: UploadFile = File(...),
+    plan_id: str = Form(...),
+    request: Request = None,
+    _=Depends(_require_superadmin),
+):
+    """Admin bulk uploads members to a specific partner from Excel."""
+    from ...services.member_service import MemberService
+    from ...schemas.member import MemberCreate
+
+    contents = await file.read()
+    try:
+        header_row, data_rows, col_idx = _parse_member_excel(contents)
+    except HTTPException:
+        raise
+    except Exception:
+        raise HTTPException(status_code=422, detail="Invalid Excel file — must be .xlsx format")
+
+    svc = MemberService()
+    results = {"total_rows": len(data_rows), "created": [], "skipped": [], "errors": []}
+
+    for row_num, row in enumerate(data_rows, start=2):
+        rd = _member_row_to_dict(row, col_idx)
+        row_errors = _validate_member_row(rd)
+        if row_errors:
+            results["errors"].append({"row": row_num, "email": rd.get("email"), "errors": row_errors})
+            continue
+        email = rd["email"]
+        try:
+            body = MemberCreate(
+                email=email,
+                name=rd.get("name") or email.split("@")[0],
+                mobile_no=rd.get("mobile_no") or "0000000000",
+                gender=rd.get("gender") or None,
+                address_line=rd.get("address_line") or None,
+                address_city=rd.get("address_city") or None,
+                address_state=rd.get("address_state") or None,
+                address_pin=rd.get("address_pin") or None,
+                sale_date=rd.get("sale_date") or None,
+                sales_channel=rd.get("sales_channel") or None,
+                branch_code=rd.get("branch_code") or None,
+                salesperson_name=rd.get("salesperson_name") or None,
+                employee_code=rd.get("employee_code") or None,
+                data1=rd.get("data1") or None,
+                data2=rd.get("data2") or None,
+                data3=rd.get("data3") or None,
+                partner_id=str(partner_id),
+                plan_id=plan_id,
+            )
+            svc.create_member(body)
+            results["created"].append({"row": row_num, "email": email})
+        except HTTPException as e:
+            results["skipped"].append({"row": row_num, "email": email, "reason": e.detail})
+        except Exception as exc:
+            results["errors"].append({"row": row_num, "email": email, "errors": [str(exc)]})
+
+    if results["created"]:
+        from ...services.notification_helper import notify_partner
+        notify_partner(
+            partner_id=str(partner_id),
+            type="new_member",
+            title=f"{len(results['created'])} new member(s) added via bulk upload",
+            body=f"{len(results['created'])} member(s) were enrolled under your account.",
+            ref_id=str(partner_id),
+            ref_type="partner",
+        )
+    return ResponseModel.ok(data=results)
+
+
+@admin_partners_router.get("/{partner_id}/members/bulk-upload/sample")
+async def admin_member_bulk_sample(partner_id: UUID, _=Depends(_require_superadmin)):
+    """Return a sample Excel for member bulk upload."""
+    from openpyxl.styles import Alignment
+
+    HEADERS = [
+        "Email ID", "Name", "Mobile Number", "Gender",
+        "Address", "City", "State", "PIN Code",
+        "Sale Date", "Sales Channel", "Branch Code", "Salesperson Name", "Employee Code",
+        "Data 1", "Data 2", "Data 3",
+    ]
+    SAMPLE = [
+        "john.doe@example.com", "John Doe", "9876543210", "Male",
+        "123 MG Road", "Mumbai", "Maharashtra", "400001",
+        "2024-01-15", "Direct", "BRN001", "Jane Smith", "EMP123",
+        "", "", "",
+    ]
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Members"
+    hdr_fill = PatternFill(start_color="0A2257", end_color="0A2257", fill_type="solid")
+    for col_num, h in enumerate(HEADERS, start=1):
+        cell = ws.cell(row=1, column=col_num, value=h)
+        cell.font = Font(bold=True, color="FFFFFF")
+        cell.fill = hdr_fill
+        cell.alignment = Alignment(horizontal="center")
+        ws.column_dimensions[cell.column_letter].width = max(len(h) + 4, 18)
+    for col_num, v in enumerate(SAMPLE, start=1):
+        ws.cell(row=2, column=col_num, value=v)
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    return StreamingResponse(
+        buf,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": "attachment; filename=member_upload_sample.xlsx"},
+    )
+
+
+@admin_partners_router.post("/{partner_id}/members/bulk-upload/report")
+async def admin_member_bulk_report(
+    partner_id: UUID,
+    file: UploadFile = File(...),
+    _=Depends(_require_superadmin),
+):
+    """Dry-run member upload and return annotated Excel with error rows highlighted red."""
+    contents = await file.read()
+    try:
+        header_row, data_rows, col_idx = _parse_member_excel(contents)
+    except HTTPException:
+        raise
+    except Exception:
+        raise HTTPException(status_code=422, detail="Invalid Excel file")
+
+    wb_out = openpyxl.Workbook()
+    ws_out = wb_out.active
+    ws_out.title = "Member Upload Report"
+
+    GREEN_FILL = PatternFill(start_color="C6EFCE", end_color="C6EFCE", fill_type="solid")
+    RED_FILL   = PatternFill(start_color="FFC7CE", end_color="FFC7CE", fill_type="solid")
+    HDR_FILL   = PatternFill(start_color="BDD7EE", end_color="BDD7EE", fill_type="solid")
+    GREEN_FONT = Font(color="276128")
+    RED_FONT   = Font(color="9C0006")
+    HDR_FONT   = Font(bold=True)
+
+    header_list = list(header_row) + ["Status", "Error Details"]
+    for col_idx_h, val in enumerate(header_list, start=1):
+        cell = ws_out.cell(row=1, column=col_idx_h, value=val)
+        cell.fill = HDR_FILL
+        cell.font = HDR_FONT
+
+    status_col = len(header_list) - 1
+    error_col  = len(header_list)
+
+    for row_num, row in enumerate(data_rows, start=2):
+        rd = _member_row_to_dict(row, col_idx)
+        row_errors = _validate_member_row(rd)
+        fill   = RED_FILL   if row_errors else GREEN_FILL
+        font   = RED_FONT   if row_errors else GREEN_FONT
+        status = "Error ✗"  if row_errors else "OK ✓"
+        err_msg = "; ".join(row_errors) if row_errors else ""
+        for col_i, val in enumerate(row, start=1):
+            cell = ws_out.cell(row=row_num, column=col_i, value=val)
+            cell.fill = fill
+            cell.font = font
+        for col_i in range(len(row) + 1, status_col):
+            ws_out.cell(row=row_num, column=col_i, value="").fill = fill
+        ws_out.cell(row=row_num, column=status_col, value=status).fill = fill
+        err_cell = ws_out.cell(row=row_num, column=error_col, value=err_msg)
+        err_cell.fill = fill
+        err_cell.font = font
+
+    for col in ws_out.columns:
+        max_len = max((len(str(c.value or "")) for c in col), default=0)
+        ws_out.column_dimensions[col[0].column_letter].width = min(max_len + 4, 50)
+
+    buf = io.BytesIO()
+    wb_out.save(buf)
+    buf.seek(0)
+    return StreamingResponse(
+        buf,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": "attachment; filename=member_upload_report.xlsx"},
+    )
 
 
 @admin_partners_router.post("/{partner_id}/policies/list", response_model=ResponseModel)
@@ -489,3 +876,57 @@ async def list_partner_policies(
             "created_at": p.created_at.isoformat() if p.created_at else None,
         })
     return ResponseModel.ok(data={"data": result, "total": total, "skip": body.skip, "limit": body.limit})
+
+
+# ── Partner Change Requests ───────────────────────────────────────────────────
+
+def _cr_dict(cr) -> dict:
+    return {
+        "id":               str(cr.id),
+        "partner_id":       str(cr.partner_id),
+        "requested_fields": cr.requested_fields,
+        "reason":           cr.reason,
+        "status":           cr.status,
+        "admin_note":       cr.admin_note,
+        "reviewed_by":      cr.reviewed_by,
+        "reviewed_at":      cr.reviewed_at.isoformat() if cr.reviewed_at else None,
+        "created_at":       cr.created_at.isoformat() if cr.created_at else None,
+    }
+
+
+class CRReviewBody(BaseModel):
+    admin_note: Optional[str] = None
+
+
+@admin_partners_router.get("/{partner_id}/change-requests", response_model=ResponseModel)
+async def list_partner_change_requests(
+    partner_id: UUID, request: Request,
+    status: str = None, skip: int = 0, limit: int = 50,
+    _=Depends(_require_superadmin),
+):
+    pq = PartnerQuery()
+    total, rows = pq.list_change_requests(
+        partner_id=str(partner_id), status=status, skip=skip, limit=limit
+    )
+    return ResponseModel.ok(data={
+        "data": [_cr_dict(cr) for cr in rows],
+        "total": total, "skip": skip, "limit": limit,
+    })
+
+
+@admin_partners_router.post("/change-requests/{cr_id}/approve", response_model=ResponseModel)
+async def approve_partner_change_request(
+    cr_id: str, body: CRReviewBody, request: Request, _=Depends(_require_superadmin)
+):
+    admin_id = request.state.user_id if hasattr(request.state, "user_id") else "admin"
+    cr = PartnerService().approve_change_request(cr_id, admin_id=admin_id, admin_note=body.admin_note)
+    return ResponseModel.ok(data=_cr_dict(cr))
+
+
+@admin_partners_router.post("/change-requests/{cr_id}/reject", response_model=ResponseModel)
+async def reject_partner_change_request(
+    cr_id: str, body: CRReviewBody, request: Request, _=Depends(_require_superadmin)
+):
+    admin_id = request.state.user_id if hasattr(request.state, "user_id") else "admin"
+    cr = PartnerService().reject_change_request(cr_id, admin_id=admin_id, admin_note=body.admin_note)
+    return ResponseModel.ok(data=_cr_dict(cr))

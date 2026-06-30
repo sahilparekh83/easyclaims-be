@@ -20,6 +20,15 @@ def _notif_dict(n) -> dict:
     }
 
 
+@admin_notifications_router.get("/badge-counts", response_model=ResponseModel)
+async def badge_counts(request: Request, payload=Depends(_require_superadmin)):
+    """Return total unread count for the admin sidebar bell badge."""
+    user_id = request.state.user_payload["sub"]
+    nq = NotificationQuery()
+    total = nq.unread_count(user_id)
+    return ResponseModel.ok(data={"total": total})
+
+
 @admin_notifications_router.get("", response_model=ResponseModel)
 async def list_notifications(
     request: Request,
