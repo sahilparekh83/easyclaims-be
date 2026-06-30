@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import Optional, List
 from pydantic import BaseModel, EmailStr, field_validator
 import re
 
@@ -31,6 +31,7 @@ class PartnerCreate(BaseModel):
     data_1: Optional[str] = None
     data_2: Optional[str] = None
     data_3: Optional[str] = None
+    plan_ids: List[str] = []
 
     @field_validator("mobile_no")
     @classmethod

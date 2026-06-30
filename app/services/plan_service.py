@@ -50,9 +50,37 @@ class PlanService:
         }
         return self.query.create(**kwargs)
 
+    def _count_members_and_partners(self, plan_id) -> tuple[int, int]:
+        from ..db.session import session_scope
+        from ..db.models.member import MemberEnrollment
+        from ..db.models.partner import PartnerPlan
+        import uuid as _uuid
+        pid = _uuid.UUID(str(plan_id))
+        with session_scope() as session:
+            members = session.query(MemberEnrollment).filter(
+                MemberEnrollment.plan_id == pid
+            ).count()
+            partners = session.query(PartnerPlan).filter(
+                PartnerPlan.plan_id == str(pid)
+            ).count()
+        return members, partners
+
     def update(self, plan_id: str, data: PlanUpdate) -> MembershipPlan:
-        self.get_by_id(plan_id)
+        plan = self.get_by_id(plan_id)
         kwargs = data.model_dump(exclude_none=True)
+
+        if "status" in kwargs and kwargs["status"] != plan.status:
+            new_status = kwargs["status"]
+            # Active → Draft or Archived is blocked when the plan has members or partners linked
+            if plan.status == "Active" and new_status in ("Draft", "Archived"):
+                members, partners = self._count_members_and_partners(plan.id)
+                if members > 0 or partners > 0:
+                    raise HTTPException(
+                        status_code=409,
+                        detail=f"Cannot change status to '{new_status}' — plan has {members} enrolled member(s) "
+                               f"and {partners} linked partner(s). Unlink all first.",
+                    )
+
         if "benefits" in kwargs:
             benefits_obj = data.benefits
             kwargs.pop("benefits")
@@ -73,10 +101,15 @@ class PlanService:
         return p
 
     def delete(self, plan_id: str) -> None:
-        plan = self.get_by_id(plan_id)
-        if plan.status != "Draft":
-            raise HTTPException(status_code=409, detail="Only Draft plans can be deleted")
-        self.query.soft_delete(plan_id)
+        self.get_by_id(plan_id)
+        members, partners = self._count_members_and_partners(plan_id)
+        if members > 0 or partners > 0:
+            raise HTTPException(
+                status_code=409,
+                detail=f"Cannot delete — plan has {members} enrolled member(s) and "
+                       f"{partners} linked partner(s). Unlink all before deleting.",
+            )
+        self.query.hard_delete(plan_id)
 
     def link_partner(self, plan_id: str, partner_id: str) -> None:
         plan = self.get_by_id(plan_id)

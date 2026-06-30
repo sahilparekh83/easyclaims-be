@@ -49,14 +49,16 @@ class EmailTemplateQuery:
             session.expunge(t)
             return t
 
-    def create_if_not_exists(self, slug: str, subject: str, html_body: str, description: str = "") -> EmailTemplate:
+    def create_if_not_exists(self, slug: str, html_body: str, subject: str = None,
+                             description: str = "", channel_type: str = "email") -> EmailTemplate:
         """Insert only if slug doesn't already exist. Preserves admin-edited content on restarts."""
         with session_scope() as session:
             existing = session.query(EmailTemplate).filter(EmailTemplate.slug == slug).first()
             if existing:
                 session.expunge(existing)
                 return existing
-            t = EmailTemplate(slug=slug, subject=subject, html_body=html_body, description=description)
+            t = EmailTemplate(slug=slug, subject=subject, html_body=html_body,
+                              description=description, channel_type=channel_type)
             session.add(t)
             session.flush()
             session.expunge(t)

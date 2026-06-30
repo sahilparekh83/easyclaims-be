@@ -24,19 +24,27 @@ async def list_plans(request: Request, skip: int = 0, limit: int = 100,
     from ...db.models.member import MemberEnrollment
     from sqlalchemy import func
 
+    from ...db.models.partner import PartnerPlan
+
     plans = PlanService().list_all(skip=skip, limit=limit)
 
     with session_scope() as session:
-        counts = dict(
+        member_counts = dict(
             session.query(MemberEnrollment.plan_id, func.count(MemberEnrollment.id))
             .group_by(MemberEnrollment.plan_id)
+            .all()
+        )
+        partner_counts = dict(
+            session.query(PartnerPlan.plan_id, func.count(PartnerPlan.partner_id))
+            .group_by(PartnerPlan.plan_id)
             .all()
         )
 
     result = []
     for p in plans:
         d = _plan_to_dict(p)
-        d["member_count"] = counts.get(p.id, 0)
+        d["member_count"] = member_counts.get(p.id, 0)
+        d["partner_count"] = partner_counts.get(str(p.id), 0)
         result.append(d)
 
     return ResponseModel.ok(data=result)

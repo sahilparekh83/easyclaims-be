@@ -1,6 +1,7 @@
 import uuid as _uuid
+from datetime import datetime, timezone
 from typing import Optional, List, Tuple
-from ..models.partner import Partner
+from ..models.partner import Partner, PartnerChangeRequest
 from ..session import session_scope
 from .list_helper import apply_global_filter, apply_field_filters, apply_sort, paginate
 
@@ -96,3 +97,55 @@ class PartnerQuery:
             p.is_deleted = True
             p.status = "Inactive"
             return True
+
+    # ── Change Requests ───────────────────────────────────────────────────────
+
+    def create_change_request(self, partner_id: str, requested_fields: dict,
+                              reason: str = None) -> PartnerChangeRequest:
+        with session_scope() as session:
+            cr = PartnerChangeRequest(
+                partner_id=_uuid.UUID(str(partner_id)),
+                requested_fields=requested_fields,
+                reason=reason,
+            )
+            session.add(cr)
+            session.flush()
+            session.expunge(cr)
+            return cr
+
+    def list_change_requests(self, partner_id: str = None, status: str = None,
+                             skip: int = 0, limit: int = 50) -> Tuple[int, List[PartnerChangeRequest]]:
+        with session_scope() as session:
+            q = session.query(PartnerChangeRequest)
+            if partner_id:
+                q = q.filter(PartnerChangeRequest.partner_id == _uuid.UUID(str(partner_id)))
+            if status:
+                q = q.filter(PartnerChangeRequest.status == status)
+            q = q.order_by(PartnerChangeRequest.created_at.desc())
+            total = q.count()
+            rows = q.offset(skip).limit(limit).all()
+            for r in rows:
+                session.expunge(r)
+            return total, rows
+
+    def get_change_request(self, cr_id: str) -> Optional[PartnerChangeRequest]:
+        with session_scope() as session:
+            cr = session.query(PartnerChangeRequest).filter(
+                PartnerChangeRequest.id == _uuid.UUID(str(cr_id))
+            ).first()
+            if cr:
+                session.expunge(cr)
+            return cr
+
+    def update_change_request(self, cr_id: str, **kwargs) -> Optional[PartnerChangeRequest]:
+        with session_scope() as session:
+            cr = session.query(PartnerChangeRequest).filter(
+                PartnerChangeRequest.id == _uuid.UUID(str(cr_id))
+            ).first()
+            if not cr:
+                return None
+            for k, v in kwargs.items():
+                setattr(cr, k, v)
+            session.flush()
+            session.expunge(cr)
+            return cr

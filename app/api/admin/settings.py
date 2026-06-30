@@ -9,6 +9,7 @@ admin_settings_router = APIRouter()
 
 KNOWN_SETTINGS = {
     "upload_reminder_delay_minutes": "How many minutes after enrollment to send the upload reminder WhatsApp (e.g. 1440 for 24 hours)",
+    "child_age_limit": "Maximum age (in years) allowed for a Child family member (e.g. 21)",
 }
 
 

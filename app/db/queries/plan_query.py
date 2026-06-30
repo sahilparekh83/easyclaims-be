@@ -46,37 +46,30 @@ class PlanQuery:
             return plans
 
     def list_for_partner(self, partner_id: str, active_only: bool = False) -> List[MembershipPlan]:
-        """Returns global active plans + partner-type plans explicitly linked to this partner.
+        """Returns only plans explicitly linked to this partner by admin.
 
-        Linked partner plans are shown regardless of Draft/Active status — the admin
-        linking act is sufficient authorization. Pass active_only=True to restrict to
-        Active plans only (e.g. for member-facing enrollment selection).
+        Pass active_only=True to restrict to Active plans only (e.g. for
+        member-facing enrollment selection).
         """
         with session_scope() as session:
-            global_plans = session.query(MembershipPlan).filter(
-                MembershipPlan.status == "Active",
-                MembershipPlan.plan_type == "global",
-                MembershipPlan.is_deleted == False,
-            ).all()
             linked_ids = [
                 row.plan_id for row in
                 session.query(PartnerPlan).filter(
                     PartnerPlan.partner_id == _uuid.UUID(str(partner_id))
                 ).all()
             ]
-            partner_plans = []
-            if linked_ids:
-                q = session.query(MembershipPlan).filter(
-                    MembershipPlan.id.in_(linked_ids),
-                    MembershipPlan.is_deleted == False,
-                )
-                if active_only:
-                    q = q.filter(MembershipPlan.status == "Active")
-                partner_plans = q.all()
-            all_plans = global_plans + partner_plans
-            for p in all_plans:
+            if not linked_ids:
+                return []
+            q = session.query(MembershipPlan).filter(
+                MembershipPlan.id.in_(linked_ids),
+                MembershipPlan.is_deleted == False,
+            )
+            if active_only:
+                q = q.filter(MembershipPlan.status == "Active")
+            plans = q.all()
+            for p in plans:
                 session.expunge(p)
-            return all_plans
+            return plans
 
     def create(self, **kwargs) -> MembershipPlan:
         with session_scope() as session:
@@ -109,6 +102,16 @@ class PlanQuery:
             if not p:
                 return False
             p.is_deleted = True
+            return True
+
+    def hard_delete(self, plan_id: str) -> bool:
+        with session_scope() as session:
+            p = session.query(MembershipPlan).filter(
+                MembershipPlan.id == _uuid.UUID(str(plan_id)),
+            ).first()
+            if not p:
+                return False
+            session.delete(p)
             return True
 
     def link_partner(self, plan_id: str, partner_id: str) -> bool:

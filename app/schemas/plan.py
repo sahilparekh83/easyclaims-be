@@ -88,6 +88,14 @@ class PlanUpdate(BaseModel):
     price: Optional[int] = None
     cycle: Optional[str] = None
     plan_type: Optional[str] = None
+    status: Optional[str] = None
     color: Optional[str] = None
     popular: Optional[bool] = None
     benefits: Optional[BenefitsSchema] = None
+
+    @field_validator("status")
+    @classmethod
+    def status_valid(cls, v):
+        if v is not None and v not in ("Draft", "Active", "Archived"):
+            raise ValueError("invalid status")
+        return v

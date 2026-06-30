@@ -14,8 +14,9 @@ class EmailTemplate(Base):
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     slug = Column(String, nullable=False, unique=True, index=True)
+    channel_type = Column(String, nullable=False, server_default="email")
     description = Column(String, nullable=True)
-    subject = Column(String, nullable=False)
+    subject = Column(String, nullable=True)
     html_body = Column(Text, nullable=False)
     is_active = Column(Boolean, nullable=False, default=True)
     created_at = Column(DateTime(timezone=True), default=utcnow)

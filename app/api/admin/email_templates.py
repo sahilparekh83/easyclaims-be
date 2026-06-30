@@ -19,6 +19,7 @@ def _tpl_dict(t) -> dict:
     return {
         "id": str(t.id),
         "slug": t.slug,
+        "channel_type": getattr(t, "channel_type", "email") or "email",
         "description": t.description,
         "subject": t.subject,
         "html_body": t.html_body,

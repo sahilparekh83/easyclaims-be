@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime, timezone
 from sqlalchemy import Column, String, Integer, Boolean, DateTime, ForeignKey, Text, UniqueConstraint
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import UUID, JSONB
 from ..base import Base
 
 
@@ -58,4 +58,23 @@ class PartnerPlan(Base):
     )
 
     def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+
+
+class PartnerChangeRequest(Base):
+    __tablename__ = "partner_change_requests"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    partner_id = Column(UUID(as_uuid=True), ForeignKey("partners.id"), nullable=False)
+    requested_fields = Column(JSONB, nullable=False)
+    reason = Column(Text, nullable=True)
+    status = Column(String, nullable=False, default="pending")  # pending | approved | rejected
+    reviewed_by = Column(String, nullable=True)
+    reviewed_at = Column(DateTime(timezone=True), nullable=True)
+    admin_note = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), default=utcnow)
+    updated_at = Column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+
+    def __init__(self, **kwargs):
+        kwargs.setdefault("status", "pending")
         super().__init__(**kwargs)

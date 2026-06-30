@@ -6,6 +6,7 @@ from ...services.member_service import MemberService
 from ...services.audit_service import AuditService
 from ...db.queries.member_query import MemberQuery
 from ...db.queries.plan_query import PlanQuery
+from ...db.queries.system_setting_query import SystemSettingQuery
 from ..deps import _require_customer
 
 member_family_router = APIRouter()
@@ -25,9 +26,13 @@ async def list_family(request: Request, _=Depends(_require_customer)):
         if plan:
             plan_family_limit = plan.benefit_family
 
+    child_age_limit_str = SystemSettingQuery().get("child_age_limit")
+    child_age_limit = int(child_age_limit_str) if child_age_limit_str else 21
+
     return ResponseModel.ok(data={
         "family": family,
         "plan_family_limit": plan_family_limit,
+        "child_age_limit": child_age_limit,
     })
 
 

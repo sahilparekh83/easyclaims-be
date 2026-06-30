@@ -107,3 +107,56 @@ class PartnerService:
         self.get_by_id(partner_id)
         new_key = str(uuid.uuid4()).replace("-", "")
         return self.query.update(partner_id, api_key=new_key)
+
+    # ── Change Requests ───────────────────────────────────────────────────────
+
+    def create_change_request(self, partner_id: str, requested_fields: dict,
+                              reason: str = None):
+        from datetime import datetime, timezone
+        return self.query.create_change_request(
+            partner_id=partner_id,
+            requested_fields=requested_fields,
+            reason=reason,
+        )
+
+    def approve_change_request(self, cr_id: str, admin_id: str = "admin",
+                               admin_note: str = None):
+        from datetime import datetime, timezone
+        cr = self.query.get_change_request(cr_id)
+        if not cr:
+            raise HTTPException(status_code=404, detail="Change request not found")
+        if cr.status != "pending":
+            raise HTTPException(status_code=409, detail="Change request is already reviewed")
+        # Apply requested_fields to partner record
+        fields = cr.requested_fields or {}
+        ALLOWED = {
+            "name", "city", "state", "legal_company_name", "trade_name",
+            "registered_address", "pin_code", "gstin", "pan",
+            "authorized_signatory_name", "designation", "data_1", "data_2", "data_3",
+        }
+        safe_fields = {k: v for k, v in fields.items() if k in ALLOWED}
+        if safe_fields:
+            self.query.update(str(cr.partner_id), **safe_fields)
+        return self.query.update_change_request(
+            cr_id,
+            status="approved",
+            reviewed_by=admin_id,
+            reviewed_at=datetime.now(timezone.utc),
+            admin_note=admin_note,
+        )
+
+    def reject_change_request(self, cr_id: str, admin_id: str = "admin",
+                              admin_note: str = None):
+        from datetime import datetime, timezone
+        cr = self.query.get_change_request(cr_id)
+        if not cr:
+            raise HTTPException(status_code=404, detail="Change request not found")
+        if cr.status != "pending":
+            raise HTTPException(status_code=409, detail="Change request is already reviewed")
+        return self.query.update_change_request(
+            cr_id,
+            status="rejected",
+            reviewed_by=admin_id,
+            reviewed_at=datetime.now(timezone.utc),
+            admin_note=admin_note,
+        )

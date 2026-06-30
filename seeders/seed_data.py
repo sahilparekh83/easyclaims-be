@@ -254,6 +254,70 @@ EMAIL_TEMPLATES = [
 ]
 
 
+WHATSAPP_TEMPLATES = [
+    {
+        "slug": "wa_welcome_member",
+        "description": "Sent to a new member on first enrollment",
+        "html_body": (
+            "Welcome to EasyClaims, {{ member_name }}! 🎉\n\n"
+            "You have been enrolled under *{{ partner_name }}*.\n\n"
+            "To upload your insurance policy document, visit:\n"
+            "{{ upload_url }}\n\n"
+            "For any queries, just send a message here."
+        ),
+    },
+    {
+        "slug": "wa_new_partner",
+        "description": "Sent to an existing member when a new partner is added",
+        "html_body": (
+            "Hi {{ member_name }}! 👋\n\n"
+            "You have been enrolled under a new partner on EasyClaims:\n"
+            "*{{ partner_name }}*\n\n"
+            "Your existing login credentials remain the same.\n"
+            "Log in to access your benefits: {{ login_url }}\n\n"
+            "— EasyClaims Team"
+        ),
+    },
+    {
+        "slug": "wa_membership_card",
+        "description": "Sent with the membership card PDF after enrollment",
+        "html_body": (
+            "🎟 *EasyClaims Membership Card*\n\n"
+            "👤 *Member:* {{ member_name }}\n"
+            "🏢 *Partner:* {{ partner_name }}\n"
+            "📋 *Plan:* {{ plan_name }}\n\n"
+            "*Benefits:*\n"
+            "• Family: {{ benefit_family }} member(s)\n"
+            "• Policy Slots: {{ benefit_slots }}\n"
+            "• Claim Support: {{ benefit_claim }}\n\n"
+            "Your membership card PDF is attached above.\n"
+            "Access your benefits: {{ login_url }}\n\n"
+            "— EasyClaims"
+        ),
+    },
+    {
+        "slug": "wa_policy_uploaded",
+        "description": "Sent to member when their policy document is received",
+        "html_body": (
+            "Hi {{ member_name }}! ✅\n\n"
+            "Your {{ policy_type }} policy document has been received.\n\n"
+            "We are verifying your document. You will be notified once it is approved."
+        ),
+    },
+    {
+        "slug": "wa_upload_reminder",
+        "description": "Reminder sent to members who haven't uploaded a policy document",
+        "html_body": (
+            "Hi {{ member_name }}! 👋\n\n"
+            "You are enrolled under *{{ partner_name }}* on EasyClaims, "
+            "but we haven't received your insurance policy document yet.\n\n"
+            "Please upload it here: {{ upload_url }}\n\n"
+            "If you need help, just reply to this message."
+        ),
+    },
+]
+
+
 def seed_email_templates():
     from app.db.queries.email_template_query import EmailTemplateQuery
     tq = EmailTemplateQuery()
@@ -263,8 +327,17 @@ def seed_email_templates():
             subject=tpl["subject"],
             html_body=tpl["html_body"],
             description=tpl.get("description", ""),
+            channel_type="email",
+        )
+    for tpl in WHATSAPP_TEMPLATES:
+        tq.create_if_not_exists(
+            slug=tpl["slug"],
+            html_body=tpl["html_body"],
+            description=tpl.get("description", ""),
+            channel_type="whatsapp",
         )
     logger.info("Email templates seeded: %d entries", len(EMAIL_TEMPLATES))
+    logger.info("WhatsApp templates seeded: %d entries", len(WHATSAPP_TEMPLATES))
 
 
 def run_seed():
