@@ -79,6 +79,12 @@ class PolicyFamilyQuery:
             ).delete()
         return rows > 0
 
+    def delete_by_policy(self, policy_id: str) -> int:
+        with session_scope() as session:
+            return session.query(PolicyFamilyMember).filter(
+                PolicyFamilyMember.policy_id == policy_id,
+            ).delete()
+
     def list_by_policy(self, policy_id: str) -> List[PolicyFamilyMember]:
         with session_scope() as session:
             rows = session.query(PolicyFamilyMember).filter(

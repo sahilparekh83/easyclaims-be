@@ -12,6 +12,8 @@ from ...db.queries.policy_query import PolicyQuery
 from ...db.queries.user_query import UserQuery
 from ...db.queries.partner_query import PartnerQuery
 from ...db.queries.policy_type_query import PolicyTypeQuery
+from ...db.queries.member_query import MemberQuery
+from ...db.queries.activity_query import PolicyFamilyQuery
 from ..users import _require_superadmin
 
 logger = logging.getLogger("easyclaims")
@@ -82,6 +84,8 @@ async def list_policies(
     user_cache: dict = {}
     partner_cache: dict = {}
     pt_cache: dict = {}
+    mq = MemberQuery()
+    pfq = PolicyFamilyQuery()
 
     result = []
     for p in policies:
@@ -103,13 +107,21 @@ async def list_policies(
         pa = partner_cache[pid]
         pt = pt_cache[tid]
 
-        result.append(_policy_dict(
+        linked_family = []
+        for link in pfq.list_by_policy(str(p.id)):
+            fm = mq.get_family_member(str(link.family_member_id))
+            if fm:
+                linked_family.append({"id": str(fm.id), "name": fm.name, "relation": fm.relation})
+
+        d = _policy_dict(
             p,
             member_name=u.name if u else None,
             member_email=u.email if u else None,
             partner_name=pa.name if pa else None,
             policy_type_name=pt.name if pt else None,
-        ))
+        )
+        d["linked_family_members"] = linked_family
+        result.append(d)
 
     return ResponseModel.ok(data={
         "data": result,
@@ -147,6 +159,23 @@ async def admin_upload_policy(
         "policy_type": pt.name if pt else None,
         "member_name": member.name if member else None,
     })
+
+
+@admin_policies_router.delete("/{policy_id}", response_model=ResponseModel)
+async def delete_policy(policy_id: UUID, request: Request, _=Depends(_require_superadmin)):
+    pq = PolicyQuery()
+    policy = pq.get_by_id(str(policy_id))
+    if not policy:
+        raise HTTPException(status_code=404, detail="Policy not found")
+    if policy.storage_key:
+        try:
+            get_storage().delete(policy.storage_key)
+        except Exception:
+            pass
+    from ...db.queries.activity_query import PolicyFamilyQuery
+    PolicyFamilyQuery().delete_by_policy(str(policy_id))
+    pq.soft_delete_admin(str(policy_id))
+    return ResponseModel.ok(data={"deleted": True})
 
 
 @admin_policies_router.get("/{policy_id}/view")

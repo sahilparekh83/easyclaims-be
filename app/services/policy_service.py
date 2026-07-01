@@ -56,11 +56,9 @@ def run_ai_extraction(policy_id: str, storage_key: str, member_name: str) -> Non
             except (ValueError, TypeError):
                 pass
 
-        # Determine status based on validation result
+        # Determine status based on validation result — need_review is skipped, policies go active directly
         if validation.status == "reject" or not validation.document_type_valid:
             final_status = "rejected"
-        elif validation.status == "review" or not validation.name_match:
-            final_status = "need_review"
         else:
             final_status = "active"
 
@@ -101,6 +99,17 @@ def run_ai_extraction(policy_id: str, storage_key: str, member_name: str) -> Non
                     family_members.append(ExtractedFamilyMember(name=nominee_name, relation=nominee_rel))
             except (ValueError, TypeError):
                 pass
+
+        # Always include the primary insured as Self so single policies also link
+        has_self = any(
+            (em.relation or "").strip().lower() in ("self", "primary")
+            for em in family_members
+        )
+        if not has_self and extracted.insured_name:
+            from ..agents.document_extractor import ExtractedFamilyMember
+            family_members.insert(0, ExtractedFamilyMember(
+                name=extracted.insured_name, relation="Self"
+            ))
 
         _sync_family_members(policy.user_id, policy_id, family_members)
         _detect_and_link_renewal(policy, extracted, pq)
@@ -155,30 +164,45 @@ def _sync_family_members(user_id, policy_id: str, extracted_members: list) -> No
     try:
         existing = mq.list_family(str(user_id))
         existing_by_name = {fm.name.strip().lower(): fm for fm in existing}
+        existing_self = next((fm for fm in existing if fm.relation == "Self"), None)
 
         for em in extracted_members:
             name = (em.name or "").strip()
             relation = _normalize_relation(em.relation or "")
-            if not name or relation == "Self":
+            if not name:
                 continue
 
-            fm = existing_by_name.get(name.lower())
-            if not fm:
-                dob = None
-                if em.dob:
-                    try:
-                        dob = date.fromisoformat(em.dob)
-                    except (ValueError, TypeError):
-                        pass
-                fm = mq.create_family_member(
-                    user_id=str(user_id),
-                    name=name,
-                    relation=relation,
-                    gender=em.gender,
-                    dob=dob,
-                )
-                existing_by_name[name.lower()] = fm
-                logger.info("Auto-added family member '%s' (%s) for user %s", name, relation, user_id)
+            if relation == "Self":
+                # Find or create a Self record for this user
+                fm = existing_self or existing_by_name.get(name.lower())
+                if not fm:
+                    fm = mq.create_family_member(
+                        user_id=str(user_id),
+                        name=name,
+                        relation="Self",
+                        gender=em.gender,
+                    )
+                    existing_self = fm
+                    existing_by_name[name.lower()] = fm
+                    logger.info("Auto-added Self family member '%s' for user %s", name, user_id)
+            else:
+                fm = existing_by_name.get(name.lower())
+                if not fm:
+                    dob = None
+                    if em.dob:
+                        try:
+                            dob = date.fromisoformat(em.dob)
+                        except (ValueError, TypeError):
+                            pass
+                    fm = mq.create_family_member(
+                        user_id=str(user_id),
+                        name=name,
+                        relation=relation,
+                        gender=em.gender,
+                        dob=dob,
+                    )
+                    existing_by_name[name.lower()] = fm
+                    logger.info("Auto-added family member '%s' (%s) for user %s", name, relation, user_id)
 
             try:
                 pfq.link(policy_id, str(fm.id))
@@ -405,5 +429,7 @@ class PolicyService:
                 self.storage.delete(policy.storage_key)
             except Exception:
                 logger.warning("Failed to delete storage object %s", policy.storage_key)
+        from ..db.queries.activity_query import PolicyFamilyQuery
+        PolicyFamilyQuery().delete_by_policy(policy_id)
         if not self.query.soft_delete(policy_id, user_id):
             raise HTTPException(status_code=404, detail="Policy not found")

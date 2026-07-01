@@ -173,6 +173,7 @@ async def get_member(member_id: UUID, request: Request, partner=Depends(_require
         "email": user.email,
         "name": user.name,
         "mobile_no": user.mobile_no,
+        "is_active": user.is_active,
         "has_logged_in": activity.has_logged_in if activity else False,
         "first_login_at": activity.first_login_at.isoformat() if activity and activity.first_login_at else None,
         "last_login_at": activity.last_login_at.isoformat() if activity and activity.last_login_at else None,

@@ -200,6 +200,16 @@ class PolicyQuery:
                 return True
             return False
 
+    def soft_delete_admin(self, policy_id: str) -> bool:
+        with session_scope() as session:
+            p = session.query(Policy).filter(Policy.id == policy_id).first()
+            if not p:
+                return False
+            p.is_deleted = True
+            if p.policy_number:
+                p.policy_number = f"DEL-{p.id}"
+            return True
+
     def soft_delete(self, policy_id: str, user_id: str) -> bool:
         with session_scope() as session:
             p = session.query(Policy).filter(

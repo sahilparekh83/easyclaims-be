@@ -557,6 +557,23 @@ async def list_partner_notifications(
     })
 
 
+@admin_partners_router.patch("/{partner_id}/notifications/mark-all-read", response_model=ResponseModel)
+async def mark_partner_notifications_read(
+    partner_id: UUID,
+    request: Request,
+    _=Depends(_require_superadmin),
+):
+    """Admin marks all notifications for a partner as read."""
+    pq = PartnerQuery()
+    partner = pq.get_by_id(str(partner_id))
+    if not partner:
+        raise HTTPException(status_code=404, detail="Partner not found")
+    from ...db.queries.activity_query import NotificationQuery
+    nq = NotificationQuery()
+    count = nq.mark_all_read(str(partner.user_id))
+    return ResponseModel.ok(data={"marked_read": count})
+
+
 @admin_partners_router.post("/{partner_id}/members", response_model=ResponseModel, status_code=201)
 async def admin_add_member_to_partner(partner_id: UUID, request: Request, _=Depends(_require_superadmin)):
     """Admin adds a new member to a specific partner."""
