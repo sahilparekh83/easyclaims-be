@@ -1,4 +1,5 @@
 from io import BytesIO
+from typing import Optional
 from fpdf import FPDF
 
 
@@ -7,6 +8,14 @@ WHITE = (255, 255, 255)
 LIGHT_BLUE = (240, 244, 255)
 DARK_GRAY = (80, 80, 100)
 MID_GRAY = (100, 116, 139)
+
+
+def _hex_to_rgb(hex_color: str, fallback: tuple) -> tuple:
+    try:
+        h = hex_color.lstrip("#")
+        return tuple(int(h[i:i + 2], 16) for i in (0, 2, 4))
+    except Exception:
+        return fallback
 
 
 class _Card(FPDF):
@@ -29,22 +38,40 @@ class PdfService:
         partner_type: str,
         plan_name: str,
         plan,
+        membership_number: Optional[str] = None,
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None,
+        partner_address: Optional[str] = None,
+        partner_logo_bytes: Optional[bytes] = None,
+        partner_color: Optional[str] = None,
     ) -> bytes:
+        accent = _hex_to_rgb(partner_color, NAVY) if partner_color else NAVY
+
         pdf = _Card(orientation="P", unit="mm", format="A4")
         pdf.add_page()
         pdf.set_auto_page_break(auto=True, margin=15)
         W = pdf.w - 2 * pdf.l_margin  # usable width
 
         # ── Header banner ──────────────────────────────────────────────────────
-        pdf.set_fill_color(*NAVY)
+        pdf.set_fill_color(*accent)
         pdf.rect(pdf.l_margin, 10, W, 18, "F")
-        pdf.set_xy(pdf.l_margin + 4, 13)
+
+        logo_w = 0
+        if partner_logo_bytes:
+            try:
+                logo_w = 22
+                pdf.image(BytesIO(partner_logo_bytes), x=pdf.l_margin + 4, y=12, h=14)
+            except Exception:
+                logo_w = 0
+
+        text_x = pdf.l_margin + 4 + (logo_w + 4 if logo_w else 0)
+        pdf.set_xy(text_x, 13)
         pdf.set_font("Helvetica", "B", 16)
         pdf.set_text_color(*WHITE)
-        pdf.cell(W - 8, 7, "EasyClaims", ln=0)
+        pdf.cell(W - 8 - (logo_w + 4 if logo_w else 0), 7, partner_name or "EasyClaims", ln=0)
         pdf.set_font("Helvetica", "", 9)
         pdf.set_text_color(147, 197, 253)
-        pdf.set_xy(pdf.l_margin + 4, 20)
+        pdf.set_xy(text_x, 20)
         pdf.cell(W - 8, 5, "Your Health Benefits, Simplified", ln=0)
 
         # Badge
@@ -58,25 +85,30 @@ class PdfService:
         # ── Section: Member & Partner ──────────────────────────────────────────
         y = 36
         pdf.set_xy(pdf.l_margin, y)
-        self._section_title(pdf, W, "Member Details")
+        self._section_title(pdf, W, "Member Details", accent=accent)
         y += 8
         rows = [
             ("Member Name", member_name or member_email),
             ("Email", member_email),
+            ("Membership Number", membership_number or "—"),
+            ("Membership Start Date", start_date or "—"),
+            ("Membership End Date", end_date or "—"),
             ("Partner", f"{partner_name}  ({partner_type})"),
         ]
+        if partner_address:
+            rows.append(("Partner Address", partner_address))
         y = self._info_table(pdf, y, W, rows)
 
         # ── Section: Plan ──────────────────────────────────────────────────────
         y += 4
-        self._section_title(pdf, W, "Plan Details", y=y)
+        self._section_title(pdf, W, "Plan Details", y=y, accent=accent)
         y += 8
         rows = [("Plan Name", plan_name)]
         y = self._info_table(pdf, y, W, rows)
 
         # ── Section: Benefits ─────────────────────────────────────────────────
         y += 4
-        self._section_title(pdf, W, "Plan Benefits", y=y)
+        self._section_title(pdf, W, "Plan Benefits", y=y, accent=accent)
         y += 8
         benefits = [
             ("Family Members Covered", str(getattr(plan, "benefit_family", 0))),
@@ -101,10 +133,10 @@ class PdfService:
         pdf.output(buf)
         return buf.getvalue()
 
-    def _section_title(self, pdf: FPDF, W: float, title: str, y: float = None):
+    def _section_title(self, pdf: FPDF, W: float, title: str, y: float = None, accent: tuple = NAVY):
         if y is not None:
             pdf.set_xy(pdf.l_margin, y)
-        pdf.set_fill_color(*NAVY)
+        pdf.set_fill_color(*accent)
         pdf.set_text_color(*WHITE)
         pdf.set_font("Helvetica", "B", 9)
         pdf.cell(W, 6, f"  {title.upper()}", fill=True, ln=True)

@@ -1,4 +1,5 @@
 from uuid import UUID
+from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile, File, Form
 from pydantic import BaseModel
 import openpyxl, io
@@ -20,6 +21,10 @@ from ..users import _require_superadmin
 
 class SwitchPlanBody(BaseModel):
     plan_id: str
+
+
+class CancelEnrollmentBody(BaseModel):
+    reason: Optional[str] = None
 
 admin_members_router = APIRouter()
 
@@ -148,12 +153,36 @@ async def create_member(body: MemberCreate, request: Request, _=Depends(_require
     })
 
 
+def _resolve_plan_for_row(partner_id: str, plan_name: Optional[str], default_plan_id: Optional[str]) -> tuple:
+    """Resolve the plan to enroll this row into. Row's own 'Plan Name' column wins;
+    falls back to the upload's default plan if the row doesn't specify one.
+    Returns (plan_id, error_message)."""
+    from ...db.models.partner import PartnerPlan
+    from ...db.session import session_scope
+
+    if plan_name:
+        plan = PlanQuery().get_by_name(plan_name)
+        if not plan or plan.status != "Active":
+            return None, f"Plan '{plan_name}' not found or not active"
+        if plan.plan_type == "partner":
+            with session_scope() as s:
+                linked = s.query(PartnerPlan).filter(
+                    PartnerPlan.partner_id == partner_id, PartnerPlan.plan_id == plan.id,
+                ).first()
+            if not linked:
+                return None, f"Plan '{plan_name}' is not available to this partner"
+        return str(plan.id), None
+    if default_plan_id:
+        return default_plan_id, None
+    return None, "Plan is required — add a value in the 'Plan Name' column, or select a default plan before uploading"
+
+
 @admin_members_router.post("/bulk-upload", response_model=ResponseModel, status_code=201)
 async def bulk_upload_members(
     request: Request,
     file: UploadFile = File(...),
     partner_id: str = Form(...),
-    plan_id: str = Form(...),
+    plan_id: Optional[str] = Form(None),
     _=Depends(_require_superadmin),
 ):
     """
@@ -204,6 +233,8 @@ async def bulk_upload_members(
         "data 1": "data1", "data1": "data1",
         "data 2": "data2", "data2": "data2",
         "data 3": "data3", "data3": "data3",
+        # plan
+        "plan": "plan_name", "plan name": "plan_name",
     }
     col_idx = {}
     for i, h in enumerate(header):
@@ -237,6 +268,7 @@ async def bulk_upload_members(
         city = cell("address_city")
         state = cell("address_state")
         pin = cell("address_pin")
+        plan_name = cell("plan_name")
 
         if not email:
             results["skipped"].append({"row": row_num, "reason": "empty email"})
@@ -256,11 +288,16 @@ async def bulk_upload_members(
             except Exception:
                 pass
 
+        resolved_plan_id, plan_error = _resolve_plan_for_row(partner_id, plan_name, plan_id)
+        if plan_error:
+            results["errors"].append({"row": row_num, "email": email, "reason": plan_error})
+            continue
+
         try:
             member_data = MemberCreate(
                 email=email, name=name, mobile_no=mobile, gender=gender,
                 address_line=addr, address_city=city, address_state=state, address_pin=pin,
-                partner_id=partner_id, plan_id=plan_id,
+                partner_id=partner_id, plan_id=resolved_plan_id,
                 sale_date=sale_date,
                 sales_channel=cell("sales_channel"),
                 branch_code=cell("branch_code"),
@@ -404,6 +441,24 @@ async def renew_member_enrollment(member_id: UUID, request: Request, _=Depends(_
         "status": updated.status,
         "start_date": str(updated.start_date),
         "end_date": str(updated.end_date),
+    })
+
+
+@admin_members_router.post("/{member_id}/enrollment/cancel", response_model=ResponseModel)
+async def cancel_member_enrollment(member_id: UUID, body: CancelEnrollmentBody,
+                                   request: Request, _=Depends(_require_superadmin)):
+    """Admin cancels a member's membership — blocks further portal access."""
+    mq = MemberQuery()
+    enrollments = mq.list_enrollments(str(member_id))
+    if not enrollments:
+        raise HTTPException(status_code=404, detail="No enrollment found for this member")
+    enrollment = enrollments[0]
+    svc = MemberService()
+    updated = svc.cancel_enrollment(
+        str(member_id), str(enrollment.partner_id), reason=body.reason, changed_by="admin",
+    )
+    return ResponseModel.ok(data={
+        "status": updated.status,
     })
 
 

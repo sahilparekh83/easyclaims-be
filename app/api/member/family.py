@@ -1,7 +1,7 @@
 from uuid import UUID
 from fastapi import APIRouter, Depends, Request
 from ...schemas.base import ResponseModel
-from ...schemas.member import FamilyMemberCreate, FamilyMemberUpdate, FamilyChangeRequestCreate
+from ...schemas.member import FamilyMemberUpdate, FamilyChangeRequestCreate
 from ...services.member_service import MemberService
 from ...services.audit_service import AuditService
 from ...db.queries.member_query import MemberQuery
@@ -36,20 +36,17 @@ async def list_family(request: Request, _=Depends(_require_customer)):
     })
 
 
-@member_family_router.post("", response_model=ResponseModel, status_code=201)
-async def add_family(body: FamilyMemberCreate, request: Request, _=Depends(_require_customer)):
+@member_family_router.post("/requests", response_model=ResponseModel, status_code=201)
+async def request_add_family(body: FamilyChangeRequestCreate, request: Request, _=Depends(_require_customer)):
+    """Member requests a NEW family member — admin approval creates it (E8, 4th MOM:
+    members no longer add family members directly; data comes from AI policy extraction)."""
     user_id = request.state.user_payload["sub"]
-    fm = MemberService().add_family_member(user_id, body)
-    AuditService().log(
-        actor_id=user_id, actor_type="member",
-        action="family_member_added",
-        entity_type="family_member", entity_id=str(fm.id),
-        new_value={"name": fm.name, "relation": fm.relation, "gender": fm.gender, "coverage_type": fm.coverage_type},
-    )
+    cr = MemberService().create_family_add_request(user_id, body)
     return ResponseModel.ok(data={
-        "id": str(fm.id), "name": fm.name, "relation": fm.relation,
-        "gender": fm.gender, "dob": str(fm.dob) if fm.dob else None,
-        "coverage_type": fm.coverage_type, "policy_count": 0,
+        "id": str(cr.id), "status": cr.status,
+        "entity_type": cr.entity_type, "entity_id": None,
+        "requested_fields": cr.requested_fields, "reason": cr.reason,
+        "created_at": cr.created_at.isoformat() if cr.created_at else None,
     })
 
 
@@ -70,6 +67,7 @@ async def update_family(member_id: UUID, body: FamilyMemberUpdate,
     return ResponseModel.ok(data={
         "id": str(fm.id), "name": fm.name, "relation": fm.relation,
         "gender": fm.gender, "dob": str(fm.dob) if fm.dob else None,
+        "mobile_no": fm.mobile_no, "email": fm.email,
         "coverage_type": fm.coverage_type,
     })
 

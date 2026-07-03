@@ -29,6 +29,9 @@ def _policy_dict(p, policy_type_name: str = None) -> dict:
         "file_name": p.file_name,
         "has_file": bool(p.storage_key),
         "extracted_fields": p.extracted_fields or {},
+        "vehicle_number": p.vehicle_number,
+        "vehicle_type": p.vehicle_type,
+        "vehicle_owner_family_member_id": str(p.vehicle_owner_family_member_id) if p.vehicle_owner_family_member_id else None,
         "created_at": p.created_at.isoformat() if p.created_at else None,
     }
 

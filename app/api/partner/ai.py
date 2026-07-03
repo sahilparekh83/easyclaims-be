@@ -30,6 +30,11 @@ async def dashboard_insights(request: Request, partner=Depends(_require_partner)
 
     policies = pq.list_by_partner(partner_id, skip=0, limit=1000)
     claims_count = sum(1 for p in policies if p.status == "rejected")
+    renewals_done = sum(
+        1 for p in policies
+        if p.status == "renewed" and p.updated_at
+        and p.updated_at.month == today.month and p.updated_at.year == today.year
+    )
 
     with session_scope() as session:
         open_tickets = session.query(Notification).filter(
@@ -43,8 +48,8 @@ async def dashboard_insights(request: Request, partner=Depends(_require_partner)
         total_members=total,
         active_members=active,
         expiring_soon=expiring_soon,
-        renewals_done=0,
-        float_balance=0.0,
+        renewals_done=renewals_done,
+        float_balance=float(partner.float_balance or 0),
         claims_count=claims_count,
         open_tickets=open_tickets,
         partner_id=partner_id,

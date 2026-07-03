@@ -79,6 +79,8 @@ class PartnerUpdate(BaseModel):
     city: Optional[str] = None
     state: Optional[str] = None
     status: Optional[str] = None
+    allow_member_upload: Optional[bool] = None
+    card_color: Optional[str] = None
     api_rate_limit: Optional[int] = None
     legal_company_name: Optional[str] = None
     trade_name: Optional[str] = None
@@ -98,6 +100,14 @@ class PartnerUpdate(BaseModel):
     def validate_status(cls, v):
         if v and v not in ("Active", "Inactive", "Suspended"):
             raise ValueError("Status must be Active, Inactive, or Suspended")
+        return v
+
+    @field_validator("card_color")
+    @classmethod
+    def validate_card_color(cls, v):
+        import re
+        if v and not re.match(r"^#[0-9A-Fa-f]{6}$", v):
+            raise ValueError("card_color must be a hex color like #0050b0")
         return v
 
     @field_validator("gstin")

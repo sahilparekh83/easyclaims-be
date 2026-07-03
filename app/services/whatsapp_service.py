@@ -1,7 +1,11 @@
 import logging
+from jinja2 import Environment, Undefined
 from ..configs.common import get_settings
+from ..db.queries.email_template_query import EmailTemplateQuery
 
 logger = logging.getLogger(__name__)
+
+_jinja_env = Environment(undefined=Undefined)
 
 
 class WhatsAppService:
@@ -9,6 +13,24 @@ class WhatsAppService:
         from twilio.rest import Client
         settings = get_settings()
         return Client(settings.TWILIO_ACCOUNT_SID, settings.TWILIO_AUTH_TOKEN), settings
+
+    def send_from_db_template(self, to_mobile: str, slug: str, context: dict,
+                              partner_id: str = None, media_url: str = None) -> bool:
+        """Render a WhatsApp message body from the editable DB template (`email_templates`
+        table, channel_type='whatsapp') and send it. Partner-specific override (E6) is
+        used automatically if one exists for this slug, else the system default."""
+        tpl = EmailTemplateQuery().get_for_partner(slug, partner_id, channel_type="whatsapp")
+        if not tpl:
+            logger.error("WhatsApp template '%s' not found in DB — skipping send", slug)
+            return False
+        try:
+            body = _jinja_env.from_string(tpl.html_body).render(**context)
+        except Exception:
+            logger.exception("Failed to render WhatsApp template '%s'", slug)
+            return False
+        if media_url:
+            return self.send_media(to_mobile, body, media_url)
+        return self.send_message(to_mobile, body)
 
     def send_message(self, to_mobile: str, body: str) -> bool:
         settings = get_settings()

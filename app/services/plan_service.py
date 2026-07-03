@@ -46,6 +46,7 @@ class PlanService:
             "name": data.name, "tagline": data.tagline, "info_text": data.info_text,
             "price": data.price, "cycle": data.cycle, "plan_type": data.plan_type,
             "status": data.status, "color": data.color, "popular": data.popular,
+            "max_claim_value": data.max_claim_value,
             **_benefits_to_db(data.benefits),
         }
         return self.query.create(**kwargs)

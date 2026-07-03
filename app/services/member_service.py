@@ -47,6 +47,12 @@ class MemberService:
         partner = self.partner_q.get_by_id(data.partner_id)
         if not partner:
             raise HTTPException(status_code=404, detail="Partner not found")
+        if partner.status != "Active":
+            raise HTTPException(
+                status_code=403,
+                detail=f"This partner is {partner.status.lower()} — new member registrations are blocked. "
+                       "Existing members are unaffected.",
+            )
 
         if data.plan_id:
             plan = self.plan_q.get_by_id(data.plan_id)
@@ -71,6 +77,8 @@ class MemberService:
 
         plan_obj = self.plan_q.get_by_id(plan_id)
 
+        self._deduct_float_for_enrollment(partner, plan_obj, enrollment, user)
+
         if is_new_user:
             self._send_welcome_email(user, partner)
             self._send_welcome_whatsapp(user, partner)
@@ -78,11 +86,43 @@ class MemberService:
             self._send_new_partner_email(user, partner)
             self._send_new_partner_whatsapp(user, partner)
 
-        self._send_membership_card_email(user, partner, plan_obj)
-        self._send_membership_card_whatsapp(user, partner, plan_obj)
+        self._send_membership_card_email(user, partner, plan_obj, enrollment)
+        self._send_membership_card_whatsapp(user, partner, plan_obj, enrollment)
 
         self._notify_admins_new_member(user, partner)
         return {"user": user, "enrollment": enrollment}
+
+    def _deduct_float_for_enrollment(self, partner, plan_obj, enrollment, user) -> None:
+        """Deducts the plan price from the partner's prepaid float balance.
+        Best-effort: never blocks enrollment creation, even if the partner
+        goes into a negative balance — that case is surfaced as a Low Float alert."""
+        if not plan_obj or not plan_obj.price:
+            return
+        try:
+            from ..db.queries.float_query import FloatQuery
+            fq = FloatQuery()
+            txn = fq.deduct(
+                str(partner.id), plan_obj.price,
+                ref_type="enrollment", ref_id=str(enrollment.id),
+                note=f"Enrollment — {user.name or user.email} ({plan_obj.name})",
+            )
+            if txn and txn.balance_after <= partner.low_float_threshold:
+                from .notification_helper import notify_all_admins, notify_partner
+                notify_all_admins(
+                    type="low_float_alert",
+                    title=f"Low Float — {partner.name}",
+                    body=f"{partner.name}'s float balance is now {txn.balance_after}.",
+                    ref_id=str(partner.id), ref_type="partner",
+                )
+                notify_partner(
+                    partner_id=str(partner.id),
+                    type="low_float_alert",
+                    title="Low Float Balance",
+                    body=f"Your float balance is now {txn.balance_after}. Please top up to continue enrolling members.",
+                    ref_id=str(partner.id), ref_type="partner",
+                )
+        except Exception:
+            logger.exception("Failed to deduct float balance for partner %s", partner.id)
 
     def _notify_admins_new_member(self, user, partner) -> None:
         try:
@@ -108,6 +148,7 @@ class MemberService:
                 member_name=user.name or user.email,
                 partner_name=partner.name,
                 login_url=login_url,
+                partner_id=str(partner.id),
             )
         except Exception:
             logger.exception("Failed to send welcome email to %s", user.email)
@@ -119,15 +160,15 @@ class MemberService:
             from .whatsapp_service import WhatsAppService
             from ..configs.common import get_settings
             settings = get_settings()
-            upload_url = f"{settings.FRONTEND_URL}/upload"
-            message = (
-                f"Welcome to EasyClaims, {user.name or 'there'}! 🎉\n\n"
-                f"You have been enrolled under *{partner.name}*.\n\n"
-                f"To upload your insurance policy document, visit:\n"
-                f"{upload_url}\n\n"
-                f"For any queries, just send a message here."
+            WhatsAppService().send_from_db_template(
+                user.mobile_no, "wa_welcome_member",
+                {
+                    "member_name": user.name or "there",
+                    "partner_name": partner.name,
+                    "upload_url": f"{settings.FRONTEND_URL}/upload",
+                },
+                partner_id=str(partner.id),
             )
-            WhatsAppService().send_message(user.mobile_no, message)
         except Exception:
             logger.exception("Failed to send welcome WhatsApp to %s", user.mobile_no)
 
@@ -141,6 +182,7 @@ class MemberService:
                 member_name=user.name or user.email,
                 partner_name=partner.name,
                 login_url=f"{settings.FRONTEND_URL}/login",
+                partner_id=str(partner.id),
             )
         except Exception:
             logger.exception("Failed to send new-partner email to %s", user.email)
@@ -152,23 +194,24 @@ class MemberService:
             from .whatsapp_service import WhatsAppService
             from ..configs.common import get_settings
             settings = get_settings()
-            message = (
-                f"Hi {user.name or 'there'}! 👋\n\n"
-                f"You have been enrolled under a new partner on EasyClaims:\n"
-                f"*{partner.name}*\n\n"
-                f"Your existing login credentials remain the same.\n"
-                f"Log in to access your benefits: {settings.FRONTEND_URL}/login\n\n"
-                f"— EasyClaims Team"
+            WhatsAppService().send_from_db_template(
+                user.mobile_no, "wa_new_partner",
+                {
+                    "member_name": user.name or "there",
+                    "partner_name": partner.name,
+                    "login_url": f"{settings.FRONTEND_URL}/login",
+                },
+                partner_id=str(partner.id),
             )
-            WhatsAppService().send_message(user.mobile_no, message)
         except Exception:
             logger.exception("Failed to send new-partner WhatsApp to %s", user.mobile_no)
 
-    def _send_membership_card_email(self, user, partner, plan) -> None:
+    def _send_membership_card_email(self, user, partner, plan, enrollment=None) -> None:
         try:
             from .email_service import EmailService
             from ..configs.common import get_settings
             settings = get_settings()
+            membership_number = f"MEM-{str(enrollment.id)[:8].upper()}" if enrollment else None
             EmailService().send_membership_card(
                 to_email=user.email,
                 member_name=user.name or user.email,
@@ -178,11 +221,18 @@ class MemberService:
                 plan_name=plan.name,
                 plan=plan,
                 login_url=f"{settings.FRONTEND_URL}/login",
+                membership_number=membership_number,
+                start_date=str(enrollment.start_date) if enrollment and enrollment.start_date else None,
+                end_date=str(enrollment.end_date) if enrollment and enrollment.end_date else None,
+                partner_address=getattr(partner, "registered_address", None),
+                card_logo_key=getattr(partner, "card_logo_key", None),
+                card_color=getattr(partner, "card_color", None),
+                partner_id=str(partner.id),
             )
         except Exception:
             logger.exception("Failed to send membership card email to %s", user.email)
 
-    def _send_membership_card_whatsapp(self, user, partner, plan) -> None:
+    def _send_membership_card_whatsapp(self, user, partner, plan, enrollment=None) -> None:
         if not user.mobile_no:
             return
         try:
@@ -191,6 +241,17 @@ class MemberService:
             from .media_service import MediaService
             from ..configs.common import get_settings
             settings = get_settings()
+
+            logo_bytes = None
+            card_logo_key = getattr(partner, "card_logo_key", None)
+            if card_logo_key:
+                try:
+                    from ..storage import get_storage
+                    logo_bytes = get_storage().download(card_logo_key)
+                except Exception:
+                    logger.warning("Failed to fetch partner card logo '%s' for WhatsApp card", card_logo_key)
+
+            membership_number = f"MEM-{str(enrollment.id)[:8].upper()}" if enrollment else None
             pdf_bytes = PdfService().generate_membership_card_pdf(
                 member_name=user.name or user.email,
                 member_email=user.email,
@@ -198,8 +259,15 @@ class MemberService:
                 partner_type=getattr(partner, "partner_type", "Partner"),
                 plan_name=plan.name,
                 plan=plan,
+                membership_number=membership_number,
+                start_date=str(enrollment.start_date) if enrollment and enrollment.start_date else None,
+                end_date=str(enrollment.end_date) if enrollment and enrollment.end_date else None,
+                partner_address=getattr(partner, "registered_address", None),
+                partner_logo_bytes=logo_bytes,
+                partner_color=getattr(partner, "card_color", None),
             )
             media_url = MediaService().save_card_pdf(pdf_bytes)
+
             benefits = []
             if getattr(plan, "benefit_aiqa", False):
                 benefits.append("• AI Health Query Assistant")
@@ -213,22 +281,23 @@ class MemberService:
                 benefits.append("• Hospital Cash Benefit")
             if getattr(plan, "benefit_emergency_assist", False):
                 benefits.append("• Emergency Assistance")
-            benefits_text = "\n".join(benefits) if benefits else ""
-            message = (
-                f"🎟 *EasyClaims Membership Card*\n\n"
-                f"👤 *Member:* {user.name or user.email}\n"
-                f"🏢 *Partner:* {partner.name}\n"
-                f"📋 *Plan:* {plan.name}\n\n"
-                f"*Benefits:*\n"
-                f"• Family: {plan.benefit_family} member(s)\n"
-                f"• Policy Slots: {plan.benefit_slots}\n"
-                f"• Claim Support: {plan.benefit_claim}\n"
-                f"{benefits_text}\n\n"
-                f"Your membership card PDF is attached above.\n"
-                f"Access your benefits: {settings.FRONTEND_URL}/login\n\n"
-                f"— EasyClaims"
+            extra_benefits = "\n".join(benefits) if benefits else ""
+
+            WhatsAppService().send_from_db_template(
+                user.mobile_no, "wa_membership_card",
+                {
+                    "member_name": user.name or user.email,
+                    "partner_name": partner.name,
+                    "plan_name": plan.name,
+                    "benefit_family": plan.benefit_family,
+                    "benefit_slots": plan.benefit_slots,
+                    "benefit_claim": plan.benefit_claim,
+                    "extra_benefits": extra_benefits,
+                    "login_url": f"{settings.FRONTEND_URL}/login",
+                },
+                partner_id=str(partner.id),
+                media_url=media_url,
             )
-            WhatsAppService().send_media(user.mobile_no, message, media_url)
         except Exception:
             logger.exception("Failed to send membership card WhatsApp to %s", user.mobile_no)
 
@@ -246,6 +315,8 @@ class MemberService:
             e = self.q.get_enrollment(user_id, partner_id)
             if not e:
                 raise HTTPException(status_code=403, detail="No enrollment found for this partner")
+            if e.status == "Cancelled":
+                raise HTTPException(status_code=403, detail="This membership has been cancelled")
             return e
         e = self.q.get_first_active_enrollment(user_id)
         if not e:
@@ -295,6 +366,7 @@ class MemberService:
                     old_plan=old_plan.name if old_plan else "—",
                     new_plan=new_plan.name,
                     changed_by=changed_by,
+                    partner_id=partner_id,
                 )
         except Exception:
             logger.exception("Failed to send plan-changed email for user %s", user_id)
@@ -350,6 +422,7 @@ class MemberService:
                         "plan_name": plan.name,
                         "end_date": str(new_end),
                     },
+                    partner_id=partner_id,
                 )
                 # In-app notification
                 from ..db.queries.activity_query import NotificationQuery
@@ -363,6 +436,60 @@ class MemberService:
                 )
         except Exception:
             logger.exception("Failed to send renewal email for user %s", user_id)
+
+        return updated
+
+    def cancel_enrollment(self, user_id: str, partner_id: str, reason: str = None,
+                          changed_by: str = "admin") -> MemberEnrollment:
+        """Admin cancels a member's membership. Portal access is blocked immediately."""
+        e = self.q.get_enrollment(user_id, partner_id)
+        if not e:
+            raise HTTPException(status_code=404, detail="Enrollment not found")
+        if e.status == "Cancelled":
+            raise HTTPException(status_code=400, detail="Enrollment is already cancelled")
+
+        updated = self.q.update_enrollment(user_id, partner_id, status="Cancelled")
+        if not updated:
+            raise HTTPException(status_code=500, detail="Failed to cancel enrollment")
+
+        try:
+            from ..db.queries.enrollment_history_query import EnrollmentHistoryQuery
+            EnrollmentHistoryQuery().create(
+                enrollment_id=str(updated.id),
+                user_id=user_id,
+                partner_id=partner_id,
+                to_plan_id=str(updated.plan_id),
+                from_plan_id=str(updated.plan_id),
+                action="cancelled",
+                changed_by=changed_by,
+                note=reason,
+            )
+        except Exception:
+            logger.exception("Failed to log cancellation history for user %s", user_id)
+
+        try:
+            member = self.user_q.get_user_by_id(user_id)
+            plan = self.plan_q.get_by_id(str(updated.plan_id))
+            if member and plan:
+                from .email_service import EmailService
+                EmailService().send_membership_cancelled(
+                    to_email=member.email,
+                    member_name=member.name or member.email,
+                    plan_name=plan.name,
+                    reason=reason,
+                    partner_id=partner_id,
+                )
+                from ..db.queries.activity_query import NotificationQuery
+                NotificationQuery().create(
+                    recipient_user_id=user_id,
+                    type="membership_cancelled",
+                    title="Your membership has been cancelled",
+                    body=f"Your '{plan.name}' membership has been cancelled." + (f" Reason: {reason}" if reason else ""),
+                    ref_id=str(updated.plan_id),
+                    ref_type="plan",
+                )
+        except Exception:
+            logger.exception("Failed to send cancellation notification for user %s", user_id)
 
         return updated
 
@@ -593,6 +720,41 @@ class MemberService:
         if not self.q.delete_family_member(member_id, user_id):
             raise HTTPException(status_code=404, detail="Family member not found")
 
+    def create_family_add_request(self, user_id: str, data) -> object:
+        """Member requests a NEW family member — admin approval creates the record.
+        Members no longer add family members directly (E8, 4th MOM): family data comes
+        from AI policy extraction; any manual addition must go through admin review."""
+        from .audit_service import AuditService
+        fields = data.requested_fields
+        if not fields.get("name") or not fields.get("relation"):
+            raise HTTPException(status_code=422, detail="Name and Relation are required to request a new family member")
+        cr = self.q.create_change_request(
+            user_id=user_id,
+            requested_fields=fields,
+            reason=data.reason,
+            entity_type="family_member",
+            entity_id=None,
+        )
+        try:
+            from .notification_helper import notify_all_admins
+            user = self.user_q.get_user_by_id(user_id)
+            notify_all_admins(
+                type="change_request",
+                title=f"New Family Member Request — {user.name or user.email}",
+                body=f"{user.name or user.email} requested to add a new family member: {fields.get('name')}.",
+                ref_id=str(cr.id),
+                ref_type="change_request",
+            )
+        except Exception:
+            logger.exception("Failed to notify admins of family add request %s", cr.id)
+        AuditService().log(
+            actor_id=user_id, actor_type="member",
+            action="family_add_request_created",
+            entity_type="family_member", entity_id=None,
+            new_value=fields,
+        )
+        return cr
+
     def create_family_change_request(self, user_id: str, family_member_id: str,
                                       data) -> object:
         from .audit_service import AuditService
@@ -747,7 +909,18 @@ class MemberService:
             raise HTTPException(status_code=400, detail="Change request already reviewed")
 
         # Apply changes based on entity type
-        if cr.entity_type == "family_member" and cr.entity_id:
+        if cr.entity_type == "family_member" and not cr.entity_id:
+            # New family member request (E8) — create it now that admin approved
+            from ..schemas.member import FamilyMemberCreate
+            new_fm = self.add_family_member(str(cr.user_id), FamilyMemberCreate(**cr.requested_fields))
+            AuditService().log(
+                actor_id=admin_id, actor_type="admin",
+                action="family_member_added_via_cr",
+                entity_type="family_member", entity_id=str(new_fm.id),
+                new_value=cr.requested_fields,
+                ip_address=ip,
+            )
+        elif cr.entity_type == "family_member" and cr.entity_id:
             fm = self.q.get_family_member(str(cr.entity_id))
             if fm:
                 self.q.update_family_member(

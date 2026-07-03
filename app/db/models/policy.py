@@ -29,6 +29,10 @@ class Policy(Base):
     extracted_fields = Column(JSONB, nullable=True, default=dict)
     previous_policy_id = Column(UUID(as_uuid=True), ForeignKey("policies.id"), nullable=True)
     renewal_confidence = Column(String, nullable=True)  # 'high' | 'low' | None
+    # Motor policy fields
+    vehicle_number = Column(String, nullable=True)
+    vehicle_type = Column(String, nullable=True)     # e.g. "Car" | "Bike" | "Commercial"
+    vehicle_owner_family_member_id = Column(UUID(as_uuid=True), ForeignKey("family_members.id"), nullable=True)
     is_deleted = Column(Boolean, nullable=False, default=False)
     created_at = Column(DateTime(timezone=True), default=utcnow)
     updated_at = Column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)

@@ -4,6 +4,9 @@ from typing import Optional
 from ...schemas.base import ResponseModel
 from ...db.queries.policy_query import PolicyQuery
 from ...db.queries.member_query import MemberQuery
+from ...db.queries.ticket_query import TicketQuery
+from ...db.queries.user_query import UserQuery
+from ...services.notification_helper import notify_all_admins, notify_partner
 from ...agents import PolicyQAAgent, ClaimAssistantAgent
 from ..deps import _require_customer_enrollment
 
@@ -90,4 +93,38 @@ async def claim_assist(body: ClaimRequest, request: Request, enrollment=Depends(
         language=body.language,
         member_id=user_id,
     )
-    return ResponseModel.ok(data=result.model_dump())
+
+    tq = TicketQuery()
+    dup = tq.find_recent_duplicate(user_id=user_id, category="claim")
+    ticket = tq.create(
+        channel="Portal",
+        category="claim",
+        priority="high",
+        summary=result.incident_summary,
+        user_id=user_id,
+        partner_id=partner_id,
+        ref_policy_id=str(policy.id) if policy else None,
+        is_duplicate=bool(dup),
+        duplicate_of_ticket_id=str(dup.id) if dup else None,
+    )
+
+    member = UserQuery().get_user_by_id(user_id)
+    member_label = (member.name or member.email) if member else "A member"
+    dup_note = " (possible duplicate of an existing open ticket)" if ticket.is_duplicate else ""
+    notify_all_admins(
+        type="ticket_raised",
+        title=f"New Claim Raised — {body.claim_type}",
+        body=f"{member_label} raised a {body.claim_type} claim.{dup_note}",
+        ref_id=str(ticket.id),
+        ref_type="ticket",
+    )
+    notify_partner(
+        partner_id=partner_id,
+        type="ticket_raised",
+        title=f"New Claim Raised — {body.claim_type}",
+        body=f"{member_label} raised a {body.claim_type} claim.{dup_note}",
+        ref_id=str(ticket.id),
+        ref_type="ticket",
+    )
+
+    return ResponseModel.ok(data={**result.model_dump(), "ticket_id": str(ticket.id), "is_duplicate": ticket.is_duplicate})

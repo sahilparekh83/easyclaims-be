@@ -22,7 +22,7 @@ async def get_dashboard(request: Request, _=Depends(_require_customer)):
         "active_enrollments": [
             {"partner_id": str(e.partner_id), "plan_id": str(e.plan_id),
              "status": e.status, "end_date": str(e.end_date)}
-            for e in enrollments if e.status == "active"
+            for e in enrollments if e.status == "Active"
         ],
         "family_count": len(family),
         "policy_count": len(all_policies),

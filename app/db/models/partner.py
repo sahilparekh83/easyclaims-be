@@ -1,6 +1,6 @@
 import uuid
 from datetime import datetime, timezone
-from sqlalchemy import Column, String, Integer, Boolean, DateTime, ForeignKey, Text, UniqueConstraint
+from sqlalchemy import Column, String, Integer, BigInteger, Boolean, DateTime, ForeignKey, Text, UniqueConstraint
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 from ..base import Base
 
@@ -32,16 +32,25 @@ class Partner(Base):
     data_3 = Column(String, nullable=True)
     # Existing fields
     status = Column(String, nullable=False, default="Active")
+    allow_member_upload = Column(Boolean, nullable=False, default=True)
+    card_logo_key = Column(String, nullable=True)   # storage key for uploaded Membership Card logo
+    card_color = Column(String, nullable=True)      # hex color, e.g. "#0050b0" — used as card accent/header color
     api_key = Column(String, unique=True, nullable=True)
     api_rate_limit = Column(Integer, nullable=False, default=600)
     is_deleted = Column(Boolean, nullable=False, default=False)
+    # Float ledger (prepaid balance)
+    float_balance = Column(BigInteger, nullable=False, default=0)
+    low_float_threshold = Column(BigInteger, nullable=False, default=0)
     created_at = Column(DateTime(timezone=True), default=utcnow)
     updated_at = Column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
 
     def __init__(self, **kwargs):
         kwargs.setdefault("status", "Active")
+        kwargs.setdefault("allow_member_upload", True)
         kwargs.setdefault("api_rate_limit", 600)
         kwargs.setdefault("is_deleted", False)
+        kwargs.setdefault("float_balance", 0)
+        kwargs.setdefault("low_float_threshold", 0)
         super().__init__(**kwargs)
 
 

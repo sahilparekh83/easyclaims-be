@@ -283,9 +283,34 @@ _MEMBER_COL_MAP = {
     "data 1": "data1", "data1": "data1",
     "data 2": "data2", "data2": "data2",
     "data 3": "data3", "data3": "data3",
+    "plan": "plan_name", "plan name": "plan_name",
 }
 
 _MEMBER_MANDATORY = {"email", "name", "mobile_no"}
+
+
+def _resolve_plan_for_row(partner_id: str, plan_name: Optional[str], default_plan_id: Optional[str]) -> tuple:
+    """Resolve the plan to enroll this row into. Row's own 'Plan Name' column wins;
+    falls back to the upload's default plan if the row doesn't specify one.
+    Returns (plan_id, error_message)."""
+    from ...db.models.partner import PartnerPlan
+    from ...db.session import session_scope
+
+    if plan_name:
+        plan = PlanQuery().get_by_name(plan_name)
+        if not plan or plan.status != "Active":
+            return None, f"Plan '{plan_name}' not found or not active"
+        if plan.plan_type == "partner":
+            with session_scope() as s:
+                linked = s.query(PartnerPlan).filter(
+                    PartnerPlan.partner_id == partner_id, PartnerPlan.plan_id == plan.id,
+                ).first()
+            if not linked:
+                return None, f"Plan '{plan_name}' is not available to this partner"
+        return str(plan.id), None
+    if default_plan_id:
+        return default_plan_id, None
+    return None, "Plan is required — add a value in the 'Plan Name' column, or select a default plan before uploading"
 _MEMBER_MOB_RE = re.compile(r"^\+?[\d\s\-()]{7,15}$")
 _MEMBER_PIN_RE = re.compile(r"^\d{6}$")
 
@@ -338,13 +363,19 @@ def _member_row_to_dict_partner(row, col_idx: dict) -> dict:
 @partner_members_router.post("/bulk-upload", response_model=ResponseModel)
 async def bulk_upload_members(
     file: UploadFile = File(...),
-    plan_id: str = Form(...),
+    plan_id: Optional[str] = Form(None),
     request: Request = None,
     partner=Depends(_require_partner),
 ):
     """Partner bulk uploads members from Excel. plan_id must be one of the partner's linked plans."""
     from ...db.models.partner import PartnerPlan
     from ...db.session import session_scope
+
+    if not partner.allow_member_upload:
+        raise HTTPException(
+            status_code=403,
+            detail="Bulk member upload has been disabled for your account by the Admin.",
+        )
 
     if plan_id:
         with session_scope() as s:
@@ -373,6 +404,10 @@ async def bulk_upload_members(
             results["errors"].append({"row": row_num, "email": rd.get("email"), "errors": row_errors})
             continue
         email = rd["email"]
+        resolved_plan_id, plan_error = _resolve_plan_for_row(str(partner.id), rd.get("plan_name"), plan_id)
+        if plan_error:
+            results["errors"].append({"row": row_num, "email": email, "errors": [plan_error]})
+            continue
         try:
             body = MemberCreate(
                 email=email,
@@ -392,7 +427,7 @@ async def bulk_upload_members(
                 data2=rd.get("data2") or None,
                 data3=rd.get("data3") or None,
                 partner_id=str(partner.id),
-                plan_id=plan_id or None,
+                plan_id=resolved_plan_id,
             )
             svc.create_member(body)
             results["created"].append({"row": row_num, "email": email})
@@ -409,14 +444,17 @@ async def partner_member_bulk_sample(partner=Depends(_require_partner)):
     """Return a styled sample Excel for partner member bulk upload."""
     from openpyxl.styles import Alignment
 
+    available_plans = PlanQuery().list_for_partner(str(partner.id), active_only=True)
+    sample_plan_name = available_plans[0].name if available_plans else "Gold Plan"
+
     HEADERS = [
-        "Email ID", "Name", "Mobile Number", "Gender",
+        "Email ID", "Name", "Mobile Number", "Gender", "Plan Name",
         "Address", "City", "State", "PIN Code",
         "Sale Date", "Sales Channel", "Branch Code", "Salesperson Name", "Employee Code",
         "Data 1", "Data 2", "Data 3",
     ]
     SAMPLE = [
-        "john.doe@example.com", "John Doe", "9876543210", "Male",
+        "john.doe@example.com", "John Doe", "9876543210", "Male", sample_plan_name,
         "123 MG Road", "Mumbai", "Maharashtra", "400001",
         "2024-01-15", "Direct", "BRN001", "Jane Smith", "EMP123",
         "", "", "",

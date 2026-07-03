@@ -33,7 +33,10 @@ def _partner_dict(p, user=None) -> dict:
         "email":                     str(user.email) if user else None,
         "mobile_no":                 user.mobile_no if user else None,
         "status":                    p.status,
+        "allow_member_upload":       getattr(p, "allow_member_upload", True),
         "api_rate_limit":            p.api_rate_limit,
+        "float_balance":             getattr(p, "float_balance", 0) or 0,
+        "is_low_float":              (getattr(p, "float_balance", 0) or 0) <= (getattr(p, "low_float_threshold", 0) or 0),
     }
 
 

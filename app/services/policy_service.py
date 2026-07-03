@@ -40,7 +40,6 @@ def run_ai_extraction(policy_id: str, storage_key: str, member_name: str) -> Non
             policy_id=policy_id,
         )
 
-        # AI extraction always moves to need_review — admin must approve/reject
         confidence_pct = int(extracted.confidence * 100)
 
         all_fields = extracted.model_dump(exclude={"additional_info", "confidence"})
@@ -71,21 +70,43 @@ def run_ai_extraction(policy_id: str, storage_key: str, member_name: str) -> Non
             try:
                 from .whatsapp_service import WhatsAppService
                 if member.mobile_no:
-                    WhatsAppService().send_message(
-                        member.mobile_no,
-                        f"Hi {member.name or 'there'}! ❌\n\n"
-                        f"Your uploaded document for policy *{pol_no}* could not be verified.\n\n"
-                        f"Reason: {validation.reason or 'Document does not appear to be a valid insurance policy.'}\n\n"
-                        "Please upload a valid insurance policy document."
+                    WhatsAppService().send_from_db_template(
+                        member.mobile_no, "wa_policy_rejected",
+                        {
+                            "member_name": member.name or "there",
+                            "policy_number": pol_no,
+                            "reason": validation.reason or "Document does not appear to be a valid insurance policy.",
+                        },
+                        partner_id=str(policy.partner_id),
                     )
             except Exception:
                 logger.warning("Failed to send rejection WhatsApp for policy %s", policy_id)
             try:
                 EmailService().send_policy_rejected(
-                    member.email, member.name or member.email, pol_no
+                    member.email, member.name or member.email, pol_no,
+                    partner_id=str(policy.partner_id),
                 )
             except Exception:
                 logger.warning("Failed to send rejection email for policy %s", policy_id)
+            try:
+                from .notification_helper import notify_all_admins, notify_partner
+                member_label = member.name or member.email
+                reason = validation.reason or "Document does not appear to be a valid insurance policy."
+                notify_all_admins(
+                    type="policy_rejected",
+                    title=f"Policy Rejected — {pol_no}",
+                    body=f"{member_label}'s uploaded document for policy {pol_no} was auto-rejected. Reason: {reason}",
+                    ref_id=str(policy_id), ref_type="policy",
+                )
+                notify_partner(
+                    partner_id=str(policy.partner_id),
+                    type="policy_rejected",
+                    title=f"Policy Rejected — {pol_no}",
+                    body=f"{member_label}'s uploaded document for policy {pol_no} was auto-rejected. Reason: {reason}",
+                    ref_id=str(policy_id), ref_type="policy",
+                )
+            except Exception:
+                logger.warning("Failed to send rejection admin/partner notification for policy %s", policy_id)
 
         # Build family member list — prefer structured field, fallback to nominee in additional_info
         family_members = list(extracted.family_members or [])
@@ -116,6 +137,13 @@ def run_ai_extraction(policy_id: str, storage_key: str, member_name: str) -> Non
 
     except Exception as exc:
         logger.error("AI extraction failed for policy %s: %s", policy_id, exc)
+        try:
+            failed_policy = pq.get_by_id(policy_id)
+            existing_fields = dict(failed_policy.extracted_fields or {}) if failed_policy else {}
+            existing_fields["AI Extraction Status"] = "Failed — could not process document"
+            pq.update_ai_result(policy_id, existing_fields, 0, "rejected")
+        except Exception:
+            logger.error("Failed to mark policy %s as rejected after extraction error", policy_id)
     finally:
         if tmp_path and os.path.exists(tmp_path):
             os.remove(tmp_path)
@@ -306,6 +334,28 @@ class PolicyService:
         if not contents.startswith(b"%PDF"):
             raise HTTPException(status_code=422, detail="File does not appear to be a valid PDF")
 
+        # Enforce plan's max policy cap (benefit_slots), scoped to this member+partner enrollment
+        from ..db.queries.member_query import MemberQuery
+        from ..db.queries.plan_query import PlanQuery
+        enrollment = MemberQuery().get_enrollment(user_id, partner_id)
+        if enrollment:
+            plan = PlanQuery().get_by_id(str(enrollment.plan_id))
+            if plan and plan.benefit_slots is not None:
+                current_count = len(self.query.list_by_user_partner(user_id, partner_id))
+                if current_count >= plan.benefit_slots:
+                    unit = "policy" if plan.benefit_slots == 1 else "policies"
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"Your plan allows a maximum of {plan.benefit_slots} {unit}. "
+                               f"You have already added {current_count}."
+                    )
+
+        # Validate vehicle owner belongs to this member's own family members
+        if data.vehicle_owner_family_member_id:
+            owner = MemberQuery().get_family_member(str(data.vehicle_owner_family_member_id), user_id)
+            if not owner:
+                raise HTTPException(status_code=422, detail="Vehicle owner must be one of this member's family members")
+
         # Pre-generate policy_id so folder structure includes it
         policy_id = str(uuid.uuid4())
         safe_name = f"{uuid.uuid4()}.pdf"
@@ -321,9 +371,12 @@ class PolicyService:
             policy_number=_gen_policy_number(),
             insurer=data.insurer,
             sum_insured=data.sum_insured,
+            vehicle_number=data.vehicle_number,
+            vehicle_type=data.vehicle_type,
+            vehicle_owner_family_member_id=str(data.vehicle_owner_family_member_id) if data.vehicle_owner_family_member_id else None,
             storage_key=key,
             file_name=safe_name,
-            status="active",
+            status="processing",
         )
 
         # Populate dummy extracted fields until AI extraction is configured
@@ -365,15 +418,18 @@ class PolicyService:
                 self.email.send_policy_uploaded_member(
                     member.email, member_label,
                     policy.policy_number, policy_type_name,
+                    partner_id=partner_id,
                 )
                 if member.mobile_no:
                     try:
                         from .whatsapp_service import WhatsAppService
-                        WhatsAppService().send_message(
-                            member.mobile_no,
-                            f"Hi {member_label}! ✅\n\n"
-                            f"Your {policy_type_name} policy document has been received.\n\n"
-                            "We are verifying your document. You will be notified once it is approved."
+                        WhatsAppService().send_from_db_template(
+                            member.mobile_no, "wa_policy_uploaded",
+                            {
+                                "member_name": member_label,
+                                "policy_type": policy_type_name,
+                            },
+                            partner_id=partner_id,
                         )
                     except Exception:
                         logger.warning("Failed to send WhatsApp upload confirmation to %s", member.mobile_no)
@@ -429,7 +485,8 @@ class PolicyService:
                 self.storage.delete(policy.storage_key)
             except Exception:
                 logger.warning("Failed to delete storage object %s", policy.storage_key)
-        from ..db.queries.activity_query import PolicyFamilyQuery
+        from ..db.queries.activity_query import PolicyFamilyQuery, PolicyNomineeQuery
         PolicyFamilyQuery().delete_by_policy(policy_id)
+        PolicyNomineeQuery().delete_by_policy(policy_id)
         if not self.query.soft_delete(policy_id, user_id):
             raise HTTPException(status_code=404, detail="Policy not found")

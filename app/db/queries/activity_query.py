@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import List, Optional
 from ..session import session_scope
-from ..models.activity import UserActivity, PolicyFamilyMember, Notification
+from ..models.activity import UserActivity, PolicyFamilyMember, PolicyNominee, Notification
 
 
 def utcnow():
@@ -98,6 +98,60 @@ class PolicyFamilyQuery:
         with session_scope() as session:
             rows = session.query(PolicyFamilyMember).filter(
                 PolicyFamilyMember.family_member_id == family_member_id,
+            ).all()
+            for r in rows:
+                session.expunge(r)
+        return rows
+
+
+class PolicyNomineeQuery:
+
+    def link(self, policy_id: str, nominee_id: str) -> PolicyNominee:
+        """Link a nominee to a policy. Raises ValueError if duplicate."""
+        with session_scope() as session:
+            existing = session.query(PolicyNominee).filter(
+                PolicyNominee.policy_id == policy_id,
+                PolicyNominee.nominee_id == nominee_id,
+            ).first()
+            if existing:
+                raise ValueError("Nominee already linked to this policy")
+            link = PolicyNominee(
+                id=uuid.uuid4(),
+                policy_id=policy_id,
+                nominee_id=nominee_id,
+            )
+            session.add(link)
+            session.flush()
+            session.expunge(link)
+        return link
+
+    def unlink(self, policy_id: str, nominee_id: str) -> bool:
+        with session_scope() as session:
+            rows = session.query(PolicyNominee).filter(
+                PolicyNominee.policy_id == policy_id,
+                PolicyNominee.nominee_id == nominee_id,
+            ).delete()
+        return rows > 0
+
+    def delete_by_policy(self, policy_id: str) -> int:
+        with session_scope() as session:
+            return session.query(PolicyNominee).filter(
+                PolicyNominee.policy_id == policy_id,
+            ).delete()
+
+    def list_by_policy(self, policy_id: str) -> List[PolicyNominee]:
+        with session_scope() as session:
+            rows = session.query(PolicyNominee).filter(
+                PolicyNominee.policy_id == policy_id,
+            ).all()
+            for r in rows:
+                session.expunge(r)
+        return rows
+
+    def list_by_nominee(self, nominee_id: str) -> List[PolicyNominee]:
+        with session_scope() as session:
+            rows = session.query(PolicyNominee).filter(
+                PolicyNominee.nominee_id == nominee_id,
             ).all()
             for r in rows:
                 session.expunge(r)
