@@ -13,7 +13,7 @@ from ...db.queries.user_query import UserQuery
 from ...db.queries.partner_query import PartnerQuery
 from ...db.queries.policy_type_query import PolicyTypeQuery
 from ...db.queries.member_query import MemberQuery
-from ...db.queries.activity_query import PolicyFamilyQuery
+from ...db.queries.activity_query import PolicyFamilyQuery, PolicyNomineeQuery
 from ..users import _require_superadmin
 
 logger = logging.getLogger("easyclaims")
@@ -48,6 +48,9 @@ def _policy_dict(p, member_name=None, member_email=None,
         "extracted_fields": p.extracted_fields or {},
         "previous_policy_id": str(p.previous_policy_id) if p.previous_policy_id else None,
         "renewal_confidence": p.renewal_confidence,
+        "vehicle_number": p.vehicle_number,
+        "vehicle_type": p.vehicle_type,
+        "vehicle_owner_family_member_id": str(p.vehicle_owner_family_member_id) if p.vehicle_owner_family_member_id else None,
         "created_at": p.created_at.isoformat() if p.created_at else None,
     }
 
@@ -86,6 +89,7 @@ async def list_policies(
     pt_cache: dict = {}
     mq = MemberQuery()
     pfq = PolicyFamilyQuery()
+    pnq = PolicyNomineeQuery()
 
     result = []
     for p in policies:
@@ -113,6 +117,12 @@ async def list_policies(
             if fm:
                 linked_family.append({"id": str(fm.id), "name": fm.name, "relation": fm.relation})
 
+        linked_nominees = []
+        for link in pnq.list_by_policy(str(p.id)):
+            n = mq.get_nominee(str(link.nominee_id), uid)
+            if n:
+                linked_nominees.append({"id": str(n.id), "name": n.name, "relation": n.relation, "share_percent": n.share_percent})
+
         d = _policy_dict(
             p,
             member_name=u.name if u else None,
@@ -121,6 +131,7 @@ async def list_policies(
             policy_type_name=pt.name if pt else None,
         )
         d["linked_family_members"] = linked_family
+        d["linked_nominees"] = linked_nominees
         result.append(d)
 
     return ResponseModel.ok(data={
@@ -140,11 +151,18 @@ async def admin_upload_policy(
     policy_type_id: str = Form(...),
     insurer: Optional[str] = Form(None),
     sum_insured: Optional[int] = Form(None),
+    vehicle_number: Optional[str] = Form(None),
+    vehicle_type: Optional[str] = Form(None),
+    vehicle_owner_family_member_id: Optional[str] = Form(None),
     file: UploadFile = File(...),
     _=Depends(_require_superadmin),
 ):
     """Admin upload a policy for any member — triggers real AI extraction."""
-    data = PolicyCreate(policy_type_id=policy_type_id, insurer=insurer, sum_insured=sum_insured)
+    data = PolicyCreate(
+        policy_type_id=policy_type_id, insurer=insurer, sum_insured=sum_insured,
+        vehicle_number=vehicle_number, vehicle_type=vehicle_type,
+        vehicle_owner_family_member_id=vehicle_owner_family_member_id or None,
+    )
     svc = PolicyService()
     policy = await svc.upload_policy(user_id, partner_id, data, file)
     uq = UserQuery()
@@ -172,8 +190,9 @@ async def delete_policy(policy_id: UUID, request: Request, _=Depends(_require_su
             get_storage().delete(policy.storage_key)
         except Exception:
             pass
-    from ...db.queries.activity_query import PolicyFamilyQuery
+    from ...db.queries.activity_query import PolicyFamilyQuery, PolicyNomineeQuery
     PolicyFamilyQuery().delete_by_policy(str(policy_id))
+    PolicyNomineeQuery().delete_by_policy(str(policy_id))
     pq.soft_delete_admin(str(policy_id))
     return ResponseModel.ok(data={"deleted": True})
 

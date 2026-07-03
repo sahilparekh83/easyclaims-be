@@ -43,6 +43,9 @@ Validate:
 1. document_type_valid: Is this clearly an insurance policy (Health / Motor / Life)?
 2. name_match: Does insured_name closely match member name? Allow minor spelling differences.
 3. not_expired: Is end_date in the future compared to today?
+4. Future start_date: Policies are often purchased 15-30 days before their start_date — this is normal advance
+   purchase behaviour, NOT a validation problem. A start_date up to 30 days in the future is valid and must
+   NOT be treated as a reason for "review" or "reject".
 
 Status rules:
 - "pass"   → all three checks pass

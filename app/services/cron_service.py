@@ -100,6 +100,7 @@ def run_expiry_check() -> dict:
                     plan_name=plan.name,
                     end_date=e["end_date"],
                     days_left=2,
+                    partner_id=e["partner_id"],
                 )
                 warned += 1
         except Exception as exc:
@@ -187,6 +188,7 @@ def run_expiry_check() -> dict:
                     member_name=member_name,
                     plan_name=plan_name,
                     end_date=end_date,
+                    partner_id=e["partner_id"],
                 )
 
                 # Email: partner
@@ -274,6 +276,7 @@ def run_policy_expiry_check() -> dict:
                     "policy_id": str(p.id),
                     "policy_number": p.policy_number,
                     "end_date": str(p.end_date),
+                    "partner_id": str(p.partner_id),
                     "user_id": str(u.id),
                     "user_email": u.email,
                     "user_name": u.name or u.email,
@@ -295,16 +298,21 @@ def run_policy_expiry_check() -> dict:
                 policy_type=d["policy_type"],
                 end_date=d["end_date"],
                 days_left=days,
+                partner_id=d["partner_id"],
             )
 
             if d["user_mobile"]:
                 try:
-                    wa.send_message(
-                        d["user_mobile"],
-                        f"Hi {d['user_name']}! ⚠️\n\n"
-                        f"Your *{d['policy_type']}* policy (*{d['policy_number']}*) "
-                        f"is expiring in {days} day(s) on *{d['end_date']}*.\n\n"
-                        "Please renew your policy to avoid a lapse in coverage."
+                    wa.send_from_db_template(
+                        d["user_mobile"], "wa_policy_expiry_warning",
+                        {
+                            "member_name": d["user_name"],
+                            "policy_type": d["policy_type"],
+                            "policy_number": d["policy_number"],
+                            "days_left": days,
+                            "end_date": d["end_date"],
+                        },
+                        partner_id=d["partner_id"],
                     )
                 except Exception:
                     logger.warning("WhatsApp failed for policy expiry alert: %s", d["policy_id"])
@@ -388,13 +396,15 @@ def run_policy_status_update() -> dict:
 
                     if member.mobile_no:
                         try:
-                            wa.send_message(
-                                member.mobile_no,
-                                f"Hi {member_name}! 🔔\n\n"
-                                f"Your *{pt_name}* policy (*{pol_no}*) has expired.\n\n"
-                                "Please upload your renewed policy document to maintain continuous coverage:\n"
-                                f"{upload_url}\n\n"
-                                "Need help? Just reply to this message."
+                            wa.send_from_db_template(
+                                member.mobile_no, "wa_policy_expired",
+                                {
+                                    "member_name": member_name,
+                                    "policy_type": pt_name,
+                                    "policy_number": pol_no,
+                                    "upload_url": upload_url,
+                                },
+                                partner_id=str(policy.partner_id),
                             )
                         except Exception:
                             logger.warning("WhatsApp failed for expired policy %s", policy_id)
@@ -407,6 +417,7 @@ def run_policy_status_update() -> dict:
                             policy_type=pt_name,
                             end_date=str(policy.end_date),
                             days_left=0,
+                            partner_id=str(policy.partner_id),
                         )
                     except Exception:
                         logger.warning("Email failed for expired policy %s", policy_id)
@@ -457,8 +468,9 @@ def run_document_upload_reminder() -> dict:
         with session_scope() as session:
             # Enrollments older than cutoff with no policy uploaded
             enrolled_without_docs = (
-                session.query(MemberEnrollment, User)
+                session.query(MemberEnrollment, User, Partner)
                 .join(User, User.id == MemberEnrollment.user_id)
+                .join(Partner, Partner.id == MemberEnrollment.partner_id)
                 .filter(
                     MemberEnrollment.status == "Active",
                     MemberEnrollment.created_at <= cutoff,
@@ -473,8 +485,10 @@ def run_document_upload_reminder() -> dict:
                     "name": u.name or "there",
                     "mobile": u.mobile_no,
                     "email": u.email,
+                    "partner_id": str(partner.id),
+                    "partner_name": partner.name,
                 }
-                for _, u in enrolled_without_docs
+                for _, u, partner in enrolled_without_docs
                 if u.mobile_no
             ]
     except Exception as exc:
@@ -483,14 +497,15 @@ def run_document_upload_reminder() -> dict:
 
     for member in pending:
         try:
-            message = (
-                f"Hello {member['name']}! 👋\n\n"
-                "Your policy document has not been uploaded yet.\n\n"
-                "Please upload it here:\n"
-                f"{upload_url}\n\n"
-                "If you need help, just reply to this message."
+            wa.send_from_db_template(
+                member["mobile"], "wa_upload_reminder",
+                {
+                    "member_name": member["name"],
+                    "partner_name": member["partner_name"],
+                    "upload_url": upload_url,
+                },
+                partner_id=member["partner_id"],
             )
-            wa.send_message(member["mobile"], message)
             reminded += 1
             logger.info("Upload reminder sent to %s", member["email"])
         except Exception as exc:

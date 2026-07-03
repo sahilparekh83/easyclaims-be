@@ -19,6 +19,11 @@ def _plan_to_dict(plan) -> dict:
         "status": plan.status,
         "color": plan.color,
         "popular": plan.popular,
+        "capping": {
+            "max_family_members": plan.benefit_family,
+            "max_claim_value": plan.max_claim_value,
+            "max_policies": plan.benefit_slots,
+        },
         "benefits": {
             "family": plan.benefit_family,
             "slots": plan.benefit_slots,

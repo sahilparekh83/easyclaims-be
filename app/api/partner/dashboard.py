@@ -14,8 +14,10 @@ async def get_dashboard(request: Request, partner=Depends(_require_partner)):
             MemberEnrollment.partner_id == partner.id).count()
         active = session.query(MemberEnrollment).filter(
             MemberEnrollment.partner_id == partner.id,
-            MemberEnrollment.status == "active").count()
+            MemberEnrollment.status == "Active").count()
     return ResponseModel.ok(data={
         "partner_id": str(partner.id), "total_enrollments": total,
         "active_enrollments": active, "inactive_enrollments": total - active,
+        "float_balance": partner.float_balance or 0,
+        "is_low_float": (partner.float_balance or 0) <= (partner.low_float_threshold or 0),
     })

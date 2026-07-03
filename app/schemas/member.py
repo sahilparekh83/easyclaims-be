@@ -1,6 +1,6 @@
 from typing import Optional, Any
 from datetime import date
-from pydantic import BaseModel, EmailStr, Field, field_validator
+from pydantic import BaseModel, EmailStr, Field, TypeAdapter, field_validator
 import re
 
 _MOBILE_RE = re.compile(r"^\+?[\d\s\-()]{7,15}$")
@@ -152,7 +152,7 @@ class FamilyChangeRequestCreate(BaseModel):
     @field_validator("requested_fields")
     @classmethod
     def validate_fields(cls, v):
-        allowed = {"name", "relation", "gender", "dob", "coverage_type"}
+        allowed = {"name", "relation", "gender", "dob", "coverage_type", "mobile_no", "email"}
         bad = set(v.keys()) - allowed
         if bad:
             raise ValueError(f"Fields not editable via change request: {bad}")
@@ -163,18 +163,47 @@ class FamilyChangeRequestCreate(BaseModel):
 
 # Keep existing FamilyMemberCreate, FamilyMemberUpdate, NomineeCreate, NomineeUpdate,
 # ConsentCreate, PlanSwitchRequest unchanged below this line
+FAMILY_RELATIONS = {
+    "Self", "Spouse", "Son", "Daughter", "Father", "Mother", "Brother", "Sister", "Other",
+}
+
+
 class FamilyMemberCreate(BaseModel):
     name: str
     relation: str
     gender: Optional[str] = None
     dob: Optional[date] = None
+    mobile_no: Optional[str] = None
+    email: Optional[str] = None
     coverage_type: Optional[str] = "Health"
+
+    @field_validator("relation")
+    @classmethod
+    def validate_relation(cls, v):
+        if v not in FAMILY_RELATIONS:
+            raise ValueError(f"Relation must be one of {sorted(FAMILY_RELATIONS)}")
+        return v
 
     @field_validator("gender")
     @classmethod
     def validate_gender(cls, v):
         if v and v not in ("Male", "Female", "Other"):
             raise ValueError("Gender must be Male, Female, or Other")
+        return v
+
+    @field_validator("mobile_no")
+    @classmethod
+    def validate_mobile(cls, v):
+        if v and not _MOBILE_RE.match(v):
+            raise ValueError("Invalid mobile number format")
+        return v
+
+    @field_validator("email")
+    @classmethod
+    def validate_email(cls, v):
+        if not v:
+            return None
+        TypeAdapter(EmailStr).validate_python(v)
         return v
 
     @field_validator("coverage_type")
@@ -188,13 +217,37 @@ class FamilyMemberUpdate(BaseModel):
     relation: Optional[str] = None
     gender: Optional[str] = None
     dob: Optional[date] = None
+    mobile_no: Optional[str] = None
+    email: Optional[str] = None
     coverage_type: Optional[str] = None
+
+    @field_validator("relation")
+    @classmethod
+    def validate_relation(cls, v):
+        if v and v not in FAMILY_RELATIONS:
+            raise ValueError(f"Relation must be one of {sorted(FAMILY_RELATIONS)}")
+        return v
 
     @field_validator("gender")
     @classmethod
     def validate_gender(cls, v):
         if v and v not in ("Male", "Female", "Other"):
             raise ValueError("Gender must be Male, Female, or Other")
+        return v
+
+    @field_validator("mobile_no")
+    @classmethod
+    def validate_mobile(cls, v):
+        if v and not _MOBILE_RE.match(v):
+            raise ValueError("Invalid mobile number format")
+        return v
+
+    @field_validator("email")
+    @classmethod
+    def validate_email(cls, v):
+        if not v:
+            return None
+        TypeAdapter(EmailStr).validate_python(v)
         return v
 
     @field_validator("coverage_type")

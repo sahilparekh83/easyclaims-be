@@ -96,6 +96,8 @@ class FamilyMember(Base):
     relation = Column(String, nullable=False)
     gender = Column(String, nullable=True)
     dob = Column(Date, nullable=True)
+    mobile_no = Column(String, nullable=True)
+    email = Column(String, nullable=True)
     coverage_type = Column(String, nullable=True, default="Health")
     created_at = Column(DateTime(timezone=True), default=utcnow)
     updated_at = Column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)

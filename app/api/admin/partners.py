@@ -45,6 +45,9 @@ def _partner_dict(p, user=None) -> dict:
         "data_2": getattr(p, "data_2", None),
         "data_3": getattr(p, "data_3", None),
         "status": p.status,
+        "allow_member_upload": getattr(p, "allow_member_upload", True),
+        "card_logo_key": getattr(p, "card_logo_key", None),
+        "card_color": getattr(p, "card_color", None),
         "email": str(user.email) if user else None,
         "mobile_no": user.mobile_no if user else None,
         "api_key": p.api_key,
@@ -433,6 +436,87 @@ async def regen_key(partner_id: UUID, request: Request, _=Depends(_require_super
     return ResponseModel.ok(data={"api_key": p.api_key})
 
 
+# ── Membership Card branding (E6/E7/E10, 4th MOM) ────────────────────────────
+# Partners get a controlled set of branding fields (logo + accent color) instead
+# of free-form HTML — safer for non-technical users, no HTML-to-PDF engine needed.
+
+@admin_partners_router.post("/{partner_id}/card-logo", response_model=ResponseModel, status_code=201)
+async def upload_card_logo(partner_id: UUID, request: Request,
+                           file: UploadFile = File(...), _=Depends(_require_superadmin)):
+    from ...storage import get_storage
+    if file.content_type not in ("image/png", "image/jpeg", "image/jpg", "image/webp"):
+        raise HTTPException(status_code=422, detail="Logo must be a PNG, JPEG, or WEBP image")
+    contents = await file.read()
+    if len(contents) > 2 * 1024 * 1024:
+        raise HTTPException(status_code=422, detail="Logo must be under 2MB")
+    ext = (file.filename or "logo.png").rsplit(".", 1)[-1].lower()
+    key = f"partners/{partner_id}/card-logo.{ext}"
+    get_storage().upload(key, contents, content_type=file.content_type)
+    PartnerQuery().update(str(partner_id), card_logo_key=key)
+    return ResponseModel.ok(data={"card_logo_key": key})
+
+
+@admin_partners_router.get("/{partner_id}/card-logo/view")
+async def view_card_logo(partner_id: UUID, _=Depends(_require_superadmin)):
+    from fastapi import Response
+    from ...storage import get_storage
+    p = PartnerService().get_by_id(str(partner_id))
+    if not p.card_logo_key:
+        raise HTTPException(status_code=404, detail="No logo uploaded for this partner")
+    data = get_storage().download(p.card_logo_key)
+    ext = p.card_logo_key.rsplit(".", 1)[-1].lower()
+    media_type = "image/png" if ext == "png" else "image/webp" if ext == "webp" else "image/jpeg"
+    return Response(content=data, media_type=media_type)
+
+
+@admin_partners_router.get("/{partner_id}/card-preview")
+async def preview_membership_card(partner_id: UUID, _=Depends(_require_superadmin)):
+    """Download a Membership Card PDF with dummy placeholder values, rendered with
+    this partner's current branding (logo + color) — so they can verify it before go-live."""
+    from fastapi import Response
+    from datetime import date, timedelta
+    from ...storage import get_storage
+    from ...services.pdf_service import PdfService
+
+    p = PartnerService().get_by_id(str(partner_id))
+    logo_bytes = None
+    if p.card_logo_key:
+        try:
+            logo_bytes = get_storage().download(p.card_logo_key)
+        except Exception:
+            logo_bytes = None
+
+    class _DummyPlan:
+        benefit_family = 4
+        benefit_slots = 3
+        benefit_claim = "Priority"
+        benefit_aiqa = True
+        benefit_teleconsult_sessions = 2
+        benefit_hospital_cash = True
+        benefit_wellness_sessions = 1
+        benefit_emergency_assist = True
+
+    today = date.today()
+    pdf_bytes = PdfService().generate_membership_card_pdf(
+        member_name="John Doe",
+        member_email="john.doe@example.com",
+        partner_name=p.name,
+        partner_type=p.partner_type,
+        plan_name="Sample Plan",
+        plan=_DummyPlan(),
+        membership_number="MEM-SAMPLE1",
+        start_date=str(today),
+        end_date=str(today + timedelta(days=365)),
+        partner_address=p.registered_address,
+        partner_logo_bytes=logo_bytes,
+        partner_color=p.card_color,
+    )
+    return Response(
+        content=pdf_bytes, media_type="application/pdf",
+        headers={"Content-Disposition": 'attachment; filename="membership_card_preview.pdf"'},
+    )
+
+
 @admin_partners_router.get("/{partner_id}/plans", response_model=ResponseModel)
 async def partner_plans(partner_id: UUID, request: Request, _=Depends(_require_superadmin)):
     plans = PlanService().list_for_partner(str(partner_id))
@@ -623,9 +707,35 @@ _MEMBER_COL_MAP = {
     "data 1": "data1", "data1": "data1",
     "data 2": "data2", "data2": "data2",
     "data 3": "data3", "data3": "data3",
+    "plan": "plan_name", "plan name": "plan_name",
 }
 
 _MEMBER_MANDATORY = {"email", "name", "mobile_no"}
+
+
+def _resolve_plan_for_row(partner_id: str, plan_name: Optional[str], default_plan_id: Optional[str]) -> tuple:
+    """Resolve the plan to enroll this row into. Row's own 'Plan Name' column wins;
+    falls back to the upload's default plan if the row doesn't specify one.
+    Returns (plan_id, error_message)."""
+    from ...db.queries.plan_query import PlanQuery
+    from ...db.models.partner import PartnerPlan
+    from ...db.session import session_scope
+
+    if plan_name:
+        plan = PlanQuery().get_by_name(plan_name)
+        if not plan or plan.status != "Active":
+            return None, f"Plan '{plan_name}' not found or not active"
+        if plan.plan_type == "partner":
+            with session_scope() as s:
+                linked = s.query(PartnerPlan).filter(
+                    PartnerPlan.partner_id == partner_id, PartnerPlan.plan_id == plan.id,
+                ).first()
+            if not linked:
+                return None, f"Plan '{plan_name}' is not available to this partner"
+        return str(plan.id), None
+    if default_plan_id:
+        return default_plan_id, None
+    return None, "Plan is required — add a value in the 'Plan Name' column, or select a default plan before uploading"
 _MEMBER_MOB_RE = re.compile(r"^\+?[\d\s\-()]{7,15}$")
 _MEMBER_PIN_RE = re.compile(r"^\d{6}$")
 
@@ -679,7 +789,7 @@ def _member_row_to_dict(row, col_idx: dict) -> dict:
 async def admin_bulk_upload_members_to_partner(
     partner_id: UUID,
     file: UploadFile = File(...),
-    plan_id: str = Form(...),
+    plan_id: Optional[str] = Form(None),
     request: Request = None,
     _=Depends(_require_superadmin),
 ):
@@ -705,6 +815,10 @@ async def admin_bulk_upload_members_to_partner(
             results["errors"].append({"row": row_num, "email": rd.get("email"), "errors": row_errors})
             continue
         email = rd["email"]
+        resolved_plan_id, plan_error = _resolve_plan_for_row(str(partner_id), rd.get("plan_name"), plan_id)
+        if plan_error:
+            results["errors"].append({"row": row_num, "email": email, "errors": [plan_error]})
+            continue
         try:
             body = MemberCreate(
                 email=email,
@@ -724,7 +838,7 @@ async def admin_bulk_upload_members_to_partner(
                 data2=rd.get("data2") or None,
                 data3=rd.get("data3") or None,
                 partner_id=str(partner_id),
-                plan_id=plan_id,
+                plan_id=resolved_plan_id,
             )
             svc.create_member(body)
             results["created"].append({"row": row_num, "email": email})
@@ -750,15 +864,19 @@ async def admin_bulk_upload_members_to_partner(
 async def admin_member_bulk_sample(partner_id: UUID, _=Depends(_require_superadmin)):
     """Return a sample Excel for member bulk upload."""
     from openpyxl.styles import Alignment
+    from ...db.queries.plan_query import PlanQuery
+
+    available_plans = PlanQuery().list_for_partner(str(partner_id), active_only=True)
+    sample_plan_name = available_plans[0].name if available_plans else "Gold Plan"
 
     HEADERS = [
-        "Email ID", "Name", "Mobile Number", "Gender",
+        "Email ID", "Name", "Mobile Number", "Gender", "Plan Name",
         "Address", "City", "State", "PIN Code",
         "Sale Date", "Sales Channel", "Branch Code", "Salesperson Name", "Employee Code",
         "Data 1", "Data 2", "Data 3",
     ]
     SAMPLE = [
-        "john.doe@example.com", "John Doe", "9876543210", "Male",
+        "john.doe@example.com", "John Doe", "9876543210", "Male", sample_plan_name,
         "123 MG Road", "Mumbai", "Maharashtra", "400001",
         "2024-01-15", "Direct", "BRN001", "Jane Smith", "EMP123",
         "", "", "",

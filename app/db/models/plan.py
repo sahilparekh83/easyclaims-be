@@ -37,6 +37,7 @@ class MembershipPlan(Base):
     benefit_wellness_sessions = Column(Integer, nullable=False, default=0)
     benefit_emergency_assist = Column(Boolean, nullable=False, default=False)
     benefit_legal_assist = Column(Boolean, nullable=False, default=False)
+    max_claim_value = Column(BigInteger, nullable=True)
     created_at = Column(DateTime(timezone=True), default=utcnow)
     updated_at = Column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
 

@@ -181,6 +181,8 @@ class MemberQuery:
                     "relation": fm.relation,
                     "gender": fm.gender,
                     "dob": str(fm.dob) if fm.dob else None,
+                    "mobile_no": fm.mobile_no,
+                    "email": fm.email,
                     "coverage_type": fm.coverage_type,
                     "created_at": fm.created_at.isoformat() if fm.created_at else None,
                     "policy_count": count,

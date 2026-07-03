@@ -289,7 +289,8 @@ WHATSAPP_TEMPLATES = [
             "*Benefits:*\n"
             "• Family: {{ benefit_family }} member(s)\n"
             "• Policy Slots: {{ benefit_slots }}\n"
-            "• Claim Support: {{ benefit_claim }}\n\n"
+            "• Claim Support: {{ benefit_claim }}\n"
+            "{{ extra_benefits }}\n\n"
             "Your membership card PDF is attached above.\n"
             "Access your benefits: {{ login_url }}\n\n"
             "— EasyClaims"
@@ -305,6 +306,27 @@ WHATSAPP_TEMPLATES = [
         ),
     },
     {
+        "slug": "wa_policy_rejected",
+        "description": "Sent to member when their uploaded document fails verification",
+        "html_body": (
+            "Hi {{ member_name }}! ❌\n\n"
+            "Your uploaded document for policy *{{ policy_number }}* could not be verified.\n\n"
+            "Reason: {{ reason }}\n\n"
+            "Please upload a valid insurance policy document."
+        ),
+    },
+    {
+        "slug": "wa_policy_expired",
+        "description": "Sent to member when a policy has expired",
+        "html_body": (
+            "Hi {{ member_name }}! 🔔\n\n"
+            "Your *{{ policy_type }}* policy (*{{ policy_number }}*) has expired.\n\n"
+            "Please upload your renewed policy document to maintain continuous coverage:\n"
+            "{{ upload_url }}\n\n"
+            "Need help? Just reply to this message."
+        ),
+    },
+    {
         "slug": "wa_upload_reminder",
         "description": "Reminder sent to members who haven't uploaded a policy document",
         "html_body": (
@@ -313,6 +335,16 @@ WHATSAPP_TEMPLATES = [
             "but we haven't received your insurance policy document yet.\n\n"
             "Please upload it here: {{ upload_url }}\n\n"
             "If you need help, just reply to this message."
+        ),
+    },
+    {
+        "slug": "wa_policy_expiry_warning",
+        "description": "Sent to member when a policy is about to expire",
+        "html_body": (
+            "Hi {{ member_name }}! ⚠️\n\n"
+            "Your *{{ policy_type }}* policy (*{{ policy_number }}*) "
+            "is expiring in {{ days_left }} day(s) on *{{ end_date }}*.\n\n"
+            "Please renew your policy to avoid a lapse in coverage."
         ),
     },
 ]

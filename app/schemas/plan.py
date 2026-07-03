@@ -57,7 +57,15 @@ class PlanCreate(BaseModel):
     status: str = "Draft"
     color: Optional[str] = "var(--blue-500)"
     popular: bool = False
+    max_claim_value: Optional[int] = None
     benefits: BenefitsSchema = BenefitsSchema()
+
+    @field_validator("max_claim_value")
+    @classmethod
+    def max_claim_value_positive(cls, v):
+        if v is not None and v <= 0:
+            raise ValueError("max_claim_value must be greater than 0")
+        return v
 
     @field_validator("cycle")
     @classmethod
@@ -91,6 +99,7 @@ class PlanUpdate(BaseModel):
     status: Optional[str] = None
     color: Optional[str] = None
     popular: Optional[bool] = None
+    max_claim_value: Optional[int] = None
     benefits: Optional[BenefitsSchema] = None
 
     @field_validator("status")
@@ -98,4 +107,11 @@ class PlanUpdate(BaseModel):
     def status_valid(cls, v):
         if v is not None and v not in ("Draft", "Active", "Archived"):
             raise ValueError("invalid status")
+        return v
+
+    @field_validator("max_claim_value")
+    @classmethod
+    def max_claim_value_positive(cls, v):
+        if v is not None and v <= 0:
+            raise ValueError("max_claim_value must be greater than 0")
         return v

@@ -1,0 +1,29 @@
+"""partner_allow_member_upload
+
+Revision ID: e0a1f2b3c4e1
+Revises: e0a1f2b3c4e0
+Create Date: 2026-07-02
+
+"""
+from typing import Sequence, Union
+
+from alembic import op
+import sqlalchemy as sa
+
+
+# revision identifiers, used by Alembic.
+revision: str = 'e0a1f2b3c4e1'
+down_revision: Union[str, None] = 'e0a1f2b3c4e0'
+branch_labels: Union[str, Sequence[str], None] = None
+depends_on: Union[str, Sequence[str], None] = None
+
+
+def upgrade() -> None:
+    op.add_column(
+        'partners',
+        sa.Column('allow_member_upload', sa.Boolean(), nullable=False, server_default=sa.true()),
+    )
+
+
+def downgrade() -> None:
+    op.drop_column('partners', 'allow_member_upload')

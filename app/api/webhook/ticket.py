@@ -3,6 +3,9 @@ from pydantic import BaseModel
 from typing import Optional
 from ...schemas.base import ResponseModel
 from ...db.queries.user_query import UserQuery
+from ...db.queries.member_query import MemberQuery
+from ...db.queries.ticket_query import TicketQuery
+from ...services.notification_helper import notify_all_admins, notify_partner
 from ...agents import TicketManagerAgent
 from ...configs.common import get_settings
 
@@ -45,8 +48,48 @@ async def classify_ticket(
         member_name=member_name,
         member_id=member_id,
     )
+
+    tq = TicketQuery()
+    dup = tq.find_recent_duplicate(user_id=member_id, category=result.category) if member_id else None
+
+    partner_id = None
+    if member_id:
+        enrollments = MemberQuery().list_enrollments(member_id)
+        if enrollments:
+            partner_id = str(enrollments[0].partner_id)
+
+    ticket = tq.create(
+        channel=body.channel,
+        category=result.category,
+        priority=result.priority,
+        summary=result.summary,
+        user_id=member_id,
+        partner_id=partner_id,
+        is_duplicate=bool(dup),
+        duplicate_of_ticket_id=str(dup.id) if dup else None,
+    )
+
+    dup_note = " (possible duplicate of an existing open ticket)" if ticket.is_duplicate else ""
+    notify_all_admins(
+        type="ticket_raised",
+        title=f"New {result.category.title()} Ticket — {body.channel}",
+        body=f"{member_name}: {result.summary}{dup_note}",
+        ref_id=str(ticket.id),
+        ref_type="ticket",
+    )
+    if partner_id:
+        notify_partner(
+            partner_id=partner_id,
+            type="ticket_raised",
+            title=f"New {result.category.title()} Ticket — {body.channel}",
+            body=f"{member_name}: {result.summary}{dup_note}",
+            ref_id=str(ticket.id),
+            ref_type="ticket",
+        )
+
     return ResponseModel.ok(data={
-        **result.model_dump(),
+        **{**result.model_dump(), "is_duplicate": ticket.is_duplicate},
+        "ticket_id": str(ticket.id),
         "member_id": member_id,
         "member_name": member_name,
     })

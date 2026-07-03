@@ -10,7 +10,7 @@ from ...schemas.list_request import PolicyListRequest
 from ...services.policy_service import PolicyService, run_ai_extraction
 from ...db.queries.policy_query import PolicyQuery
 from ...db.queries.member_query import MemberQuery
-from ...db.queries.activity_query import PolicyFamilyQuery
+from ...db.queries.activity_query import PolicyFamilyQuery, PolicyNomineeQuery
 from ..deps import _require_customer_enrollment
 
 member_policies_router = APIRouter()
@@ -18,6 +18,7 @@ member_policies_router = APIRouter()
 
 class UpdatePolicyBody(BaseModel):
     family_member_ids: Optional[List[str]] = None  # set linked family members (replaces current links)
+    nominee_ids: Optional[List[str]] = None         # set linked nominees (replaces current links) — Life policies
 
 
 def _get_linked_family(policy_id: str, user_id: str) -> list:
@@ -39,8 +40,27 @@ def _get_linked_family(policy_id: str, user_id: str) -> list:
     return result
 
 
+def _get_linked_nominees(policy_id: str, user_id: str) -> list:
+    """Return list of linked nominee dicts for a policy (Life policy nominee info)."""
+    pnq = PolicyNomineeQuery()
+    mq = MemberQuery()
+    links = pnq.list_by_policy(policy_id)
+    result = []
+    for link in links:
+        n = mq.get_nominee(str(link.nominee_id), user_id)
+        if n:
+            result.append({
+                "id": str(n.id),
+                "name": n.name,
+                "relation": n.relation,
+                "share_percent": n.share_percent,
+            })
+    return result
+
+
 def _policy_dict(p, policy_type_name: str = None, user_id: str = None) -> dict:
     linked = _get_linked_family(str(p.id), user_id) if user_id else []
+    nominees = _get_linked_nominees(str(p.id), user_id) if user_id else []
     return {
         "id": str(p.id),
         "policy_number": p.policy_number,
@@ -55,6 +75,10 @@ def _policy_dict(p, policy_type_name: str = None, user_id: str = None) -> dict:
         "file_name": p.file_name,
         "extracted_fields": p.extracted_fields,
         "linked_family_members": linked,
+        "linked_nominees": nominees,
+        "vehicle_number": p.vehicle_number,
+        "vehicle_type": p.vehicle_type,
+        "vehicle_owner_family_member_id": str(p.vehicle_owner_family_member_id) if p.vehicle_owner_family_member_id else None,
         "created_at": p.created_at.isoformat() if p.created_at else None,
     }
 
@@ -92,6 +116,31 @@ def _set_family_members(policy_id: str, user_id: str, family_member_ids: List[st
             pass  # already linked (shouldn't happen after clearing, but safe)
 
 
+def _set_nominees(policy_id: str, user_id: str, nominee_ids: List[str]) -> None:
+    """Replace linked nominees for a policy with the given list — Life policies."""
+    pnq = PolicyNomineeQuery()
+    mq = MemberQuery()
+
+    # Remove all current links
+    existing = pnq.list_by_policy(policy_id)
+    for link in existing:
+        pnq.unlink(policy_id, str(link.nominee_id))
+
+    # Add new links (validate each belongs to this user, deduplicate)
+    seen = set()
+    for nid in nominee_ids:
+        if nid in seen:
+            continue
+        seen.add(nid)
+        n = mq.get_nominee(nid, user_id)
+        if not n:
+            raise HTTPException(status_code=404, detail=f"Nominee {nid} not found")
+        try:
+            pnq.link(policy_id, str(n.id))
+        except ValueError:
+            pass  # already linked (shouldn't happen after clearing, but safe)
+
+
 @member_policies_router.post("/list", response_model=ResponseModel)
 async def list_policies(
     body: PolicyListRequest,
@@ -119,12 +168,20 @@ async def upload_policy(
     policy_type_id: str = Form(...),
     insurer: Optional[str] = Form(None),
     sum_insured: Optional[int] = Form(None),
+    vehicle_number: Optional[str] = Form(None),
+    vehicle_type: Optional[str] = Form(None),
+    vehicle_owner_family_member_id: Optional[str] = Form(None),
     family_member_ids: Optional[str] = Form(None, description="Comma-separated family member UUIDs"),
+    nominee_ids: Optional[str] = Form(None, description="Comma-separated nominee UUIDs — Life policies"),
     file: UploadFile = File(...),
     enrollment=Depends(_require_customer_enrollment),
 ):
     user_id = request.state.user_payload["sub"]
-    data = PolicyCreate(policy_type_id=policy_type_id, insurer=insurer, sum_insured=sum_insured)
+    data = PolicyCreate(
+        policy_type_id=policy_type_id, insurer=insurer, sum_insured=sum_insured,
+        vehicle_number=vehicle_number, vehicle_type=vehicle_type,
+        vehicle_owner_family_member_id=vehicle_owner_family_member_id or None,
+    )
     svc = PolicyService()
     policy = await svc.upload_policy(user_id, str(enrollment.partner_id), data, file)
 
@@ -132,6 +189,11 @@ async def upload_policy(
         ids = [fmid.strip() for fmid in family_member_ids.split(",") if fmid.strip()]
         if ids:
             _set_family_members(str(policy.id), user_id, ids)
+
+    if nominee_ids:
+        ids = [nid.strip() for nid in nominee_ids.split(",") if nid.strip()]
+        if ids:
+            _set_nominees(str(policy.id), user_id, ids)
 
     member_name = request.state.user_payload.get("name", "")
     background_tasks.add_task(run_ai_extraction, str(policy.id), policy.storage_key, member_name)
@@ -191,6 +253,9 @@ async def update_policy(policy_id: UUID, body: UpdatePolicyBody, request: Reques
 
     if body.family_member_ids is not None:
         _set_family_members(str(policy.id), user_id, body.family_member_ids)
+
+    if body.nominee_ids is not None:
+        _set_nominees(str(policy.id), user_id, body.nominee_ids)
 
     pt = svc.get_policy_type(str(policy.policy_type_id))
     return ResponseModel.ok(data=_policy_dict(policy, pt.name if pt else None, user_id=user_id))

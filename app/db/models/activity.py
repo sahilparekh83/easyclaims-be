@@ -40,6 +40,19 @@ class PolicyFamilyMember(Base):
     )
 
 
+class PolicyNominee(Base):
+    __tablename__ = "policy_nominees"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    policy_id = Column(UUID(as_uuid=True), ForeignKey("policies.id"), nullable=False)
+    nominee_id = Column(UUID(as_uuid=True), ForeignKey("nominees.id"), nullable=False)
+    created_at = Column(DateTime(timezone=True), default=utcnow)
+
+    __table_args__ = (
+        UniqueConstraint("policy_id", "nominee_id", name="uq_policy_nominee"),
+    )
+
+
 class Notification(Base):
     __tablename__ = "notifications"
 
