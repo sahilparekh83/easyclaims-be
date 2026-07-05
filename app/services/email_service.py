@@ -204,6 +204,16 @@ class EmailService:
             "login_url": login_url,
         }, partner_id=partner_id)
 
+    def send_ticket_raised(self, to_email: str, member_name: str,
+                           ticket_id: str, summary: str, channel: str,
+                           partner_id: str = None) -> bool:
+        return self.send_from_template(to_email, "ticket_raised", {
+            "member_name": member_name or to_email,
+            "ticket_id": ticket_id,
+            "summary": summary,
+            "channel": channel,
+        }, partner_id=partner_id)
+
     def send_membership_card(self, to_email: str, member_name: str, member_email: str,
                               partner_name: str, partner_type: str, plan_name: str,
                               plan, login_url: str,
