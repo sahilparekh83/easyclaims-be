@@ -77,6 +77,16 @@ class TicketQuery:
                 session.expunge(r)
             return rows
 
+    def list_by_user(self, user_id: str, skip: int = 0, limit: int = 20) -> List[Ticket]:
+        with session_scope() as session:
+            rows = (session.query(Ticket)
+                    .filter(Ticket.user_id == user_id)
+                    .order_by(Ticket.created_at.desc())
+                    .offset(skip).limit(limit).all())
+            for r in rows:
+                session.expunge(r)
+            return rows
+
     def update_status(self, ticket_id: str, status: str) -> bool:
         with session_scope() as session:
             t = session.query(Ticket).filter(Ticket.id == ticket_id).first()

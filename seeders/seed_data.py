@@ -198,6 +198,36 @@ EMAIL_TEMPLATES = [
 </body></html>""",
     },
     {
+        "slug": "ticket_raised",
+        "description": "Sent to member when their claim ticket is created via portal or WhatsApp",
+        "subject": "Your Claim Request Has Been Received — Ticket #{{ ticket_id[:8] }}",
+        "html_body": """<html><body style="font-family:Arial,sans-serif;color:#222;max-width:600px;margin:0 auto">
+<div style="background:#0a2257;padding:20px 28px;border-radius:10px 10px 0 0">
+  <span style="color:#fff;font-size:20px;font-weight:800">EasyClaims</span>
+  <div style="color:#93c5fd;font-size:12px;margin-top:2px">Claim Assistance</div>
+</div>
+<div style="background:#fff;border:1px solid #e2e8f0;border-top:none;padding:28px;border-radius:0 0 10px 10px">
+  <p>Dear <strong>{{ member_name }}</strong>,</p>
+  <p>We have received your claim request. Our team will review it and follow up with you shortly.</p>
+  <table style="width:100%;border-collapse:collapse;background:#f0f9ff;border-radius:10px;overflow:hidden;margin:16px 0">
+    <tr style="background:#e0f2fe">
+      <td style="padding:10px 16px;font-size:12px;color:#555;font-weight:600;width:140px">Ticket ID</td>
+      <td style="padding:10px 16px;font-weight:700;font-size:14px;font-family:monospace">{{ ticket_id }}</td>
+    </tr>
+    <tr>
+      <td style="padding:10px 16px;font-size:12px;color:#555;font-weight:600">Summary</td>
+      <td style="padding:10px 16px;font-size:13px">{{ summary }}</td>
+    </tr>
+    <tr style="background:#e0f2fe">
+      <td style="padding:10px 16px;font-size:12px;color:#555;font-weight:600">Channel</td>
+      <td style="padding:10px 16px;font-size:13px">{{ channel }}</td>
+    </tr>
+  </table>
+  <p style="color:#888;font-size:12px;margin-top:24px">— EasyClaims Team</p>
+</div>
+</body></html>""",
+    },
+    {
         "slug": "membership_card",
         "description": "Membership card email sent after enrollment — PDF card attached, shows partner/plan/benefits",
         "subject": "Your EasyClaims Membership Card — {{ plan_name }}",
@@ -345,6 +375,18 @@ WHATSAPP_TEMPLATES = [
             "Your *{{ policy_type }}* policy (*{{ policy_number }}*) "
             "is expiring in {{ days_left }} day(s) on *{{ end_date }}*.\n\n"
             "Please renew your policy to avoid a lapse in coverage."
+        ),
+    },
+    {
+        "slug": "wa_ticket_raised",
+        "description": "Sent to member when their claim ticket is created",
+        "html_body": (
+            "Hi {{ member_name }}! 🎫\n\n"
+            "Your claim request has been received.\n\n"
+            "*Ticket ID:* {{ ticket_id }}\n"
+            "*Summary:* {{ summary }}\n\n"
+            "Our team will follow up with you shortly.\n\n"
+            "— EasyClaims Team"
         ),
     },
 ]

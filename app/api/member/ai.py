@@ -1,14 +1,18 @@
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
-from typing import Optional
+from typing import Optional, List
 from ...schemas.base import ResponseModel
 from ...db.queries.policy_query import PolicyQuery
 from ...db.queries.member_query import MemberQuery
 from ...db.queries.ticket_query import TicketQuery
 from ...db.queries.user_query import UserQuery
+from ...db.queries.partner_query import PartnerQuery
 from ...services.notification_helper import notify_all_admins, notify_partner
+from ...services.email_service import EmailService
+from ...services.whatsapp_service import WhatsAppService
 from ...agents import PolicyQAAgent, ClaimAssistantAgent
 from ..deps import _require_customer_enrollment
+from ...configs.common import get_settings
 
 member_ai_router = APIRouter()
 
@@ -110,7 +114,10 @@ async def claim_assist(body: ClaimRequest, request: Request, enrollment=Depends(
 
     member = UserQuery().get_user_by_id(user_id)
     member_label = (member.name or member.email) if member else "A member"
+    member_email = member.email if member else None
+    member_mobile = member.mobile_no if member else None
     dup_note = " (possible duplicate of an existing open ticket)" if ticket.is_duplicate else ""
+
     notify_all_admins(
         type="ticket_raised",
         title=f"New Claim Raised — {body.claim_type}",
@@ -127,4 +134,58 @@ async def claim_assist(body: ClaimRequest, request: Request, enrollment=Depends(
         ref_type="ticket",
     )
 
-    return ResponseModel.ok(data={**result.model_dump(), "ticket_id": str(ticket.id), "is_duplicate": ticket.is_duplicate})
+    # Email + WhatsApp to member
+    settings = get_settings()
+    ticket_id_str = str(ticket.id)
+    summary_str = result.incident_summary or ""
+    if member_email:
+        try:
+            EmailService().send_ticket_raised(
+                to_email=member_email,
+                member_name=member_label,
+                ticket_id=ticket_id_str,
+                summary=summary_str,
+                channel="Portal",
+                partner_id=partner_id,
+            )
+        except Exception:
+            pass
+    if member_mobile:
+        try:
+            WhatsAppService().send_from_db_template(
+                to_mobile=member_mobile,
+                slug="wa_ticket_raised",
+                context={
+                    "member_name": member_label,
+                    "ticket_id": ticket_id_str,
+                    "summary": summary_str,
+                },
+                partner_id=partner_id,
+            )
+        except Exception:
+            pass
+
+    return ResponseModel.ok(data={**result.model_dump(), "ticket_id": ticket_id_str, "is_duplicate": ticket.is_duplicate})
+
+
+@member_ai_router.get("/tickets", response_model=ResponseModel)
+async def list_member_tickets(
+    skip: int = 0,
+    limit: int = 20,
+    enrollment=Depends(_require_customer_enrollment),
+):
+    user_id = str(enrollment.user_id)
+    tickets = TicketQuery().list_by_user(user_id=user_id, skip=skip, limit=limit)
+    return ResponseModel.ok(data=[
+        {
+            "id": str(t.id),
+            "category": t.category,
+            "priority": t.priority,
+            "status": t.status,
+            "summary": t.summary,
+            "channel": t.channel,
+            "is_duplicate": t.is_duplicate,
+            "created_at": t.created_at.isoformat() if t.created_at else None,
+        }
+        for t in tickets
+    ])

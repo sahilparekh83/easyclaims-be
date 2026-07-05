@@ -27,6 +27,16 @@ class MemberService:
         self.partner_q = PartnerQuery()
 
     def create_member(self, data: MemberCreate) -> dict:
+        partner = self.partner_q.get_by_id(data.partner_id)
+        if not partner:
+            raise HTTPException(status_code=404, detail="Partner not found")
+        if partner.status != "Active":
+            raise HTTPException(
+                status_code=403,
+                detail=f"This partner is {partner.status.lower()} — new member registrations are blocked. "
+                       "Existing members are unaffected.",
+            )
+
         is_new_user = False
         existing = self.user_q.get_user_by_email(str(data.email))
         if existing:
@@ -42,16 +52,6 @@ class MemberService:
             user = self.user_q.create_user(
                 email=str(data.email), name=data.name,
                 user_type=UserType.CUSTOMER, mobile_no=data.mobile_no,
-            )
-
-        partner = self.partner_q.get_by_id(data.partner_id)
-        if not partner:
-            raise HTTPException(status_code=404, detail="Partner not found")
-        if partner.status != "Active":
-            raise HTTPException(
-                status_code=403,
-                detail=f"This partner is {partner.status.lower()} — new member registrations are blocked. "
-                       "Existing members are unaffected.",
             )
 
         if data.plan_id:
