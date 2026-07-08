@@ -35,6 +35,15 @@ class PartnerQuery:
                 session.expunge(p)
             return p
 
+    def get_by_code(self, partner_code: str) -> Optional[Partner]:
+        with session_scope() as session:
+            p = session.query(Partner).filter(
+                Partner.partner_code == partner_code
+            ).first()
+            if p:
+                session.expunge(p)
+            return p
+
     def list_all(self, skip: int = 0, limit: int = 100) -> List[Partner]:
         with session_scope() as session:
             partners = session.query(Partner).filter(
@@ -56,6 +65,8 @@ class PartnerQuery:
             return total, rows
 
     def create(self, user_id: str, name: str, partner_type: str,
+               partner_code: str,
+               partner_type_id: str = None,
                city: str = None, api_key: str = None,
                state: str = None, legal_company_name: str = None,
                trade_name: str = None, registered_address: str = None,
@@ -65,6 +76,8 @@ class PartnerQuery:
         with session_scope() as session:
             p = Partner(
                 user_id=user_id, name=name, partner_type=partner_type,
+                partner_code=partner_code,
+                partner_type_id=partner_type_id,
                 city=city, api_key=api_key, state=state,
                 legal_company_name=legal_company_name, trade_name=trade_name,
                 registered_address=registered_address, pin_code=pin_code,

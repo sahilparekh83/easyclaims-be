@@ -13,7 +13,7 @@ class PartnerCreate(BaseModel):
     name: str
     email: EmailStr
     mobile_no: str
-    partner_type: str = "Broker"
+    partner_type: str = "Other"
 
     # Mandatory onboarding fields
     legal_company_name: str
@@ -67,10 +67,9 @@ class PartnerCreate(BaseModel):
     @field_validator("partner_type")
     @classmethod
     def validate_partner_type(cls, v):
-        allowed = {"Broker", "Corporate", "NGO", "Other"}
-        if v not in allowed:
-            raise ValueError(f"Partner type must be one of: {', '.join(sorted(allowed))}")
-        return v
+        # Actual membership check against the managed partner_types table happens in
+        # PartnerService.create/update, so the dynamic list stays admin-configurable.
+        return v.strip() if v else v
 
 
 class PartnerUpdate(BaseModel):

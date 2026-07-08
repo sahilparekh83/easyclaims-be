@@ -1,3 +1,4 @@
+import base64
 import smtplib
 import logging
 from email.mime.text import MIMEText
@@ -53,6 +54,37 @@ class EmailService:
 
     def _send(self, to_email: str, subject: str, html_body: str,
               attachment_bytes: bytes = None, attachment_filename: str = None) -> bool:
+        if self.settings.EMAIL_PROVIDER == "gmail":
+            return self._send_via_smtp(to_email, subject, html_body,
+                                       attachment_bytes, attachment_filename)
+        return self._send_via_resend(to_email, subject, html_body,
+                                     attachment_bytes, attachment_filename)
+
+    def _send_via_resend(self, to_email: str, subject: str, html_body: str,
+                         attachment_bytes: bytes = None, attachment_filename: str = None) -> bool:
+        import resend
+        resend.api_key = self.settings.RESEND_API_KEY
+        params: dict = {
+            "from": self.settings.RESEND_FROM_EMAIL,
+            "to": [to_email],
+            "subject": subject,
+            "html": html_body,
+        }
+        if attachment_bytes and attachment_filename:
+            params["attachments"] = [{
+                "filename": attachment_filename,
+                "content": list(attachment_bytes),
+            }]
+        try:
+            resend.Emails.send(params)
+            logger.info("Email sent via Resend to %s (subject: %s)", to_email, subject)
+            return True
+        except Exception as exc:
+            logger.exception("Failed to send email via Resend to %s: %s", to_email, exc)
+            return False
+
+    def _send_via_smtp(self, to_email: str, subject: str, html_body: str,
+                       attachment_bytes: bytes = None, attachment_filename: str = None) -> bool:
         from email.mime.application import MIMEApplication
         msg = MIMEMultipart("mixed")
         msg["Subject"] = subject
@@ -71,7 +103,7 @@ class EmailService:
                     server.starttls()
                 server.login(self.settings.SMTP_USER, self.settings.SMTP_PASSWORD)
                 server.sendmail(self.settings.SMTP_FROM_EMAIL, to_email, msg.as_string())
-            logger.info("Email sent to %s (subject: %s)", to_email, subject)
+            logger.info("Email sent via SMTP to %s (subject: %s)", to_email, subject)
             return True
         except Exception as exc:
             logger.exception("Failed to send email to %s: %s", to_email, exc)

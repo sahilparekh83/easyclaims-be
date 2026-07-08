@@ -66,6 +66,9 @@ class Settings(BaseSettings):
     OTP_EXPIRE_MINUTES: int = int(os.getenv("OTP_EXPIRE_MINUTES", "10"))
     OTP_MAX_ATTEMPTS: int = int(os.getenv("OTP_MAX_ATTEMPTS", "3"))
 
+    # ── Email provider — "resend" or "gmail" (SMTP) ──────────────────────────────
+    EMAIL_PROVIDER: str = os.getenv("EMAIL_PROVIDER", "resend").lower()
+
     # ── SMTP ──────────────────────────────────────────────────────────────────
     SMTP_HOST: str = os.getenv("SMTP_HOST", "smtp.gmail.com")
     SMTP_PORT: int = int(os.getenv("SMTP_PORT", "587"))
@@ -73,6 +76,8 @@ class Settings(BaseSettings):
     SMTP_PASSWORD: str = os.getenv("SMTP_PASSWORD", "")
     SMTP_FROM_EMAIL: str = os.getenv("SMTP_FROM_EMAIL", "")
     SMTP_TLS: bool = os.getenv("SMTP_TLS", "true").lower() == "true"
+    RESEND_API_KEY: str = os.getenv("RESEND_API_KEY", "")
+    RESEND_FROM_EMAIL: str = os.getenv("RESEND_FROM_EMAIL", "EasyClaims <developer@easyclaims.in>")
     UPLOAD_DIR: str = os.getenv("UPLOAD_DIR", "uploads")
 
     # ── Frontend URL (used in welcome emails / links) ─────────────────────────
@@ -148,6 +153,7 @@ class Settings(BaseSettings):
         "/auth/refresh",
         "/auth/logout",
         "/policy-types",
+        "/partner-types",
         "/webhook/whatsapp/incoming",
         "/static",
     ]

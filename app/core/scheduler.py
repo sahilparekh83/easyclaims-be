@@ -1,11 +1,25 @@
 import logging
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
-from apscheduler.triggers.interval import IntervalTrigger
 
 logger = logging.getLogger(__name__)
 
 _scheduler: BackgroundScheduler | None = None
+
+DEFAULT_UPLOAD_REMINDER_RUN_HOUR = 9
+
+
+def _get_upload_reminder_run_hour() -> int:
+    try:
+        from ..db.queries.system_setting_query import SystemSettingQuery
+        val = SystemSettingQuery().get("upload_reminder_run_hour_ist")
+        if val is not None:
+            hour = int(val)
+            if 0 <= hour <= 23:
+                return hour
+    except Exception as exc:
+        logger.exception("Failed to read upload_reminder_run_hour_ist setting: %s", exc)
+    return DEFAULT_UPLOAD_REMINDER_RUN_HOUR
 
 
 def _run_expiry_check_job():
@@ -55,9 +69,10 @@ def start_scheduler():
         id="plan_expiry_check",
         replace_existing=True,
     )
+    upload_reminder_hour = _get_upload_reminder_run_hour()
     _scheduler.add_job(
         _run_document_upload_reminder_job,
-        trigger=IntervalTrigger(minutes=1),
+        trigger=CronTrigger(hour=upload_reminder_hour, minute=0),
         id="document_upload_reminder",
         replace_existing=True,
     )
@@ -74,7 +89,10 @@ def start_scheduler():
         replace_existing=True,
     )
     _scheduler.start()
-    logger.info("APScheduler started — plan/policy expiry 08:00 IST, status update 00:30 IST, upload reminder every 1 min")
+    logger.info(
+        "APScheduler started — plan/policy expiry 08:00 IST, status update 00:30 IST, upload reminder %02d:00 IST",
+        upload_reminder_hour,
+    )
 
 
 def stop_scheduler():

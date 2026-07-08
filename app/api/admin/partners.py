@@ -18,6 +18,8 @@ from ...db.queries.user_query import UserQuery
 from ...db.queries.member_query import MemberQuery
 from ...db.queries.policy_query import PolicyQuery
 from ...db.queries.policy_type_query import PolicyTypeQuery
+from ...db.queries.partner_type_query import PartnerTypeQuery
+from ...db.queries.plan_query import PlanQuery
 from ..users import _require_superadmin
 from ..plans import _plan_to_dict
 from fastapi import HTTPException
@@ -29,8 +31,10 @@ def _partner_dict(p, user=None) -> dict:
     return {
         "id": str(p.id),
         "user_id": str(p.user_id),
+        "partner_code": p.partner_code,
         "name": p.name,
         "partner_type": p.partner_type,
+        "partner_type_id": str(p.partner_type_id) if getattr(p, "partner_type_id", None) else None,
         "city": p.city,
         "state": getattr(p, "state", None),
         "legal_company_name": getattr(p, "legal_company_name", None),
@@ -126,13 +130,21 @@ _PARTNER_COL_MAP = {
     "data 1":                      "data_1",
     "data 2":                      "data_2",
     "data 3":                      "data_3",
+    "plan code":                   "plan_code",
 }
 
 _PARTNER_MANDATORY = {
-    "legal_company_name", "trade_name", "registered_address", "city",
+    "partner_type", "legal_company_name", "trade_name", "registered_address", "city",
     "state", "pin_code", "gstin", "pan",
-    "authorized_signatory_name", "designation", "mobile_no", "email",
+    "authorized_signatory_name", "designation", "mobile_no", "email", "plan_code",
 }
+
+
+def _split_plan_codes(raw: Optional[str]) -> list:
+    """'EIAM-001, EPIAM-001' -> ['EIAM-001', 'EPIAM-001'] — comma-separated, whitespace stripped."""
+    if not raw:
+        return []
+    return [c.strip().upper() for c in raw.split(",") if c.strip()]
 
 _GSTIN_RE = re.compile(r"^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}$")
 _PAN_RE   = re.compile(r"^[A-Z]{5}[0-9]{4}[A-Z]{1}$")
@@ -140,13 +152,33 @@ _PIN_RE   = re.compile(r"^\d{6}$")
 _MOB_RE   = re.compile(r"^\+?[\d\s\-()]{7,15}$")
 
 
-def _validate_partner_row(row_data: dict) -> list:
+def _validate_partner_row(
+    row_data: dict,
+    partner_type_query: "PartnerTypeQuery" = None,
+    plan_query: "PlanQuery" = None,
+) -> list:
     """Return list of error strings for a parsed row dict. Empty list = valid."""
     errors = []
     for field in _PARTNER_MANDATORY:
         if not row_data.get(field):
             label = field.replace("_", " ").title()
             errors.append(f"{label} is required")
+
+    partner_type = row_data.get("partner_type")
+    if partner_type:
+        ptq = partner_type_query or PartnerTypeQuery()
+        if not ptq.get_by_name_or_code(partner_type):
+            active = ptq.list_all(active_only=True)
+            allowed = ", ".join(sorted(p.name for p in active))
+            errors.append(f"Invalid Partner Type '{partner_type}' — must be one of: {allowed}")
+
+    plq = plan_query or PlanQuery()
+    for code in _split_plan_codes(row_data.get("plan_code")):
+        plan = plq.get_by_code(code)
+        if not plan or plan.is_deleted:
+            errors.append(f"Invalid Plan Code '{code}' — no such plan")
+        elif plan.status != "Active":
+            errors.append(f"Plan Code '{code}' refers to a plan that is not Active (status: {plan.status})")
 
     gstin = row_data.get("gstin", "")
     if gstin and not _GSTIN_RE.match(gstin.upper()):
@@ -200,15 +232,20 @@ def _row_to_dict(row, col_idx: dict) -> dict:
 async def bulk_upload_partners(
     request: Request,
     file: UploadFile = File(...),
-    plan_ids: Optional[str] = Form(None),
     _=Depends(_require_superadmin),
 ):
     """
     Upload an Excel file to bulk-create partners.
-    Mandatory columns: Legal Company Name, Trade Name/Brand Name, Registered Office Address,
-    City, State, Pin Code, GSTIN, PAN, Authorized Signatory Name, Designation,
-    Mobile Number, Email ID.
-    Optional: Partner Type, Data 1, Data 2, Data 3.
+    Mandatory columns: Partner Type, Plan Code, Legal Company Name, Trade Name/Brand Name,
+    Registered Office Address, City, State, Pin Code, GSTIN, PAN,
+    Authorized Signatory Name, Designation, Mobile Number, Email ID.
+    Optional: Data 1, Data 2, Data 3.
+
+    Plan Code is a single column — enter one or more comma-separated plan codes (e.g.
+    "EIAM-001, EPIAM-001") to assign the partner to multiple plans. A partner-type plan
+    is explicitly linked; a global plan code is accepted but is already available to
+    every partner, so no explicit link is needed. Each plan code must belong to an
+    Active plan.
     """
     contents = await file.read()
     try:
@@ -220,13 +257,15 @@ async def bulk_upload_partners(
 
     svc = PartnerService()
     uq = UserQuery()
+    plan_query = PlanQuery()
+    plan_service = PlanService()
     admin_id = getattr(request.state, "user_id", "admin")
     ip = request.client.host if request.client else None
     results = {"created": [], "skipped": [], "errors": []}
 
     for row_num, row in enumerate(data_rows, start=2):
         rd = _row_to_dict(row, col_idx)
-        row_errors = _validate_partner_row(rd)
+        row_errors = _validate_partner_row(rd, plan_query=plan_query)
         if row_errors:
             results["errors"].append({
                 "row": row_num,
@@ -239,7 +278,7 @@ async def bulk_upload_partners(
                 name=rd["authorized_signatory_name"],
                 email=rd["email"],
                 mobile_no=rd["mobile_no"],
-                partner_type=rd.get("partner_type") or "Broker",
+                partner_type=rd["partner_type"],
                 legal_company_name=rd["legal_company_name"],
                 trade_name=rd["trade_name"],
                 registered_address=rd["registered_address"],
@@ -255,16 +294,13 @@ async def bulk_upload_partners(
                 data_3=rd.get("data_3"),
             )
             p = svc.create(partner_data)
-            if plan_ids:
-                from ...services.plan_service import PlanService
-                ps = PlanService()
-                for pid in plan_ids.split(","):
-                    pid = pid.strip()
-                    if pid:
-                        try:
-                            ps.link_partner(pid, str(p.id))
-                        except Exception:
-                            pass
+            for code in _split_plan_codes(rd.get("plan_code")):
+                plan = plan_query.get_by_code(code)
+                if plan and plan.plan_type == "partner":
+                    try:
+                        plan_service.link_partner(str(plan.id), str(p.id))
+                    except Exception:
+                        pass
             results["created"].append({"row": row_num, "email": rd["email"], "id": str(p.id)})
         except HTTPException as e:
             results["skipped"].append({"row": row_num, "email": rd.get("email"), "reason": e.detail})
@@ -368,18 +404,22 @@ async def download_partner_sample_excel(_=Depends(_require_superadmin)):
     """Return a sample Excel file with the correct partner upload column headers."""
     from io import BytesIO
     from openpyxl.styles import Alignment
+    from openpyxl.comments import Comment
+
+    active_plans = [p for p in PlanQuery().list_all(limit=1000) if p.status == "Active"]
+    sample_plan_codes = ", ".join(p.plan_code for p in active_plans[:2]) or "PLAN-001, PLAN-002"
 
     HEADERS = [
         "Legal Company Name", "Trade Name/Brand Name", "Registered Office Address",
         "City", "State", "Pin Code", "GSTIN", "PAN",
         "Authorized Signatory Name", "Designation", "Mobile Number", "Email ID",
-        "Partner Type", "Data 1", "Data 2", "Data 3",
+        "Partner Type", "Plan Code", "Data 1", "Data 2", "Data 3",
     ]
     SAMPLE_ROW = [
         "Acme Insurance Pvt Ltd", "Acme Insurance", "123 MG Road, Andheri East",
         "Mumbai", "Maharashtra", "400069", "27AAPFU0939F1ZV", "AAPFU0939F",
         "Rahul Sharma", "Director", "9876543210", "rahul@acmecorp.com",
-        "Broker", "", "", "",
+        "Insurance Broker", sample_plan_codes, "", "", "",
     ]
 
     wb = openpyxl.Workbook()
@@ -394,10 +434,46 @@ async def download_partner_sample_excel(_=Depends(_require_superadmin)):
         cell.fill = header_fill
         cell.alignment = Alignment(horizontal="center")
         ws.column_dimensions[cell.column_letter].width = max(len(header) + 4, 18)
+        if header == "Plan Code":
+            cell.comment = Comment(
+                "Mandatory. To assign multiple plans, separate plan codes with a comma, "
+                "e.g. \"EIAM-001, EPIAM-001\". Copy codes from the 'plan_details' sheet — "
+                "only Active plans can be used.",
+                "EasyClaims",
+            )
 
     # Sample data row
     for col_num, value in enumerate(SAMPLE_ROW, start=1):
         ws.cell(row=2, column=col_num, value=value)
+
+    # Reference sheet listing the active partner types from the database
+    ws_types = wb.create_sheet(title="partner_type")
+    type_header_fill = PatternFill(start_color="0A2257", end_color="0A2257", fill_type="solid")
+    header_cell = ws_types.cell(row=1, column=1, value="Partner Type")
+    header_cell.font = Font(bold=True, color="FFFFFF")
+    header_cell.fill = type_header_fill
+    header_cell.alignment = Alignment(horizontal="center")
+    ws_types.column_dimensions["A"].width = 30
+
+    active_types = PartnerTypeQuery().list_all(active_only=True)
+    for row_num, pt in enumerate(active_types, start=2):
+        ws_types.cell(row=row_num, column=1, value=pt.name)
+
+    # Reference sheet listing active plans — copy "Plan Code" values into the Partners
+    # sheet's Plan Code column (comma-separate to assign more than one plan).
+    ws_plans = wb.create_sheet(title="plan_details")
+    plan_header_fill = PatternFill(start_color="0A2257", end_color="0A2257", fill_type="solid")
+    for col_num, header in enumerate(["Plan Name", "Plan Code"], start=1):
+        cell = ws_plans.cell(row=1, column=col_num, value=header)
+        cell.font = Font(bold=True, color="FFFFFF")
+        cell.fill = plan_header_fill
+        cell.alignment = Alignment(horizontal="center")
+    ws_plans.column_dimensions["A"].width = 45
+    ws_plans.column_dimensions["B"].width = 18
+
+    for row_num, plan in enumerate(active_plans, start=2):
+        ws_plans.cell(row=row_num, column=1, value=plan.name)
+        ws_plans.cell(row=row_num, column=2, value=plan.plan_code)
 
     buf = BytesIO()
     wb.save(buf)

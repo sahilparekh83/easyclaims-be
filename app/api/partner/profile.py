@@ -15,6 +15,7 @@ def _partner_dict(p, user=None) -> dict:
     return {
         "id":                        str(p.id),
         "user_id":                   str(p.user_id),
+        "partner_code":              p.partner_code,
         "name":                      p.name,
         "partner_type":              p.partner_type,
         "city":                      p.city,

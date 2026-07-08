@@ -6,6 +6,7 @@ from .members import admin_members_router
 from .dashboard import admin_dashboard_router
 from .policies import admin_policies_router
 from .policy_types import admin_policy_types_router
+from .partner_types import admin_partner_types_router
 from .notifications import admin_notifications_router
 from .email_templates import admin_email_templates_router
 from .cron import admin_cron_router
@@ -21,6 +22,7 @@ admin_router.include_router(admin_members_router, prefix="/members", tags=["Admi
 admin_router.include_router(admin_dashboard_router, prefix="/dashboard", tags=["Admin - Dashboard"])
 admin_router.include_router(admin_policies_router, prefix="/policies", tags=["Admin - Policies"])
 admin_router.include_router(admin_policy_types_router, prefix="/policy-types", tags=["Admin - Policy Types"])
+admin_router.include_router(admin_partner_types_router, prefix="/partner-types", tags=["Admin - Partner Types"])
 admin_router.include_router(admin_notifications_router, prefix="/notifications", tags=["Admin - Notifications"])
 admin_router.include_router(admin_email_templates_router, prefix="/email-templates", tags=["Admin - Email Templates"])
 admin_router.include_router(admin_cron_router, prefix="/cron", tags=["Admin - Cron"])

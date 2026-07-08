@@ -11,6 +11,7 @@ def _plan_to_dict(plan) -> dict:
     return {
         "id": str(plan.id),
         "name": plan.name,
+        "plan_code": plan.plan_code,
         "tagline": plan.tagline,
         "info_text": plan.info_text,
         "price": plan.price,
@@ -40,6 +41,12 @@ def _plan_to_dict(plan) -> dict:
             "emergency_assist": plan.benefit_emergency_assist,
             "legal_assist": plan.benefit_legal_assist,
         },
+        "fee_slabs": plan.fee_slabs or [],
+        "basic_features_note": plan.basic_features_note or "",
+        "basic_features": plan.basic_features or [],
+        "advanced_features_note": plan.advanced_features_note or "",
+        "advanced_features": plan.advanced_features or [],
+        "co_powered_by_easyclaims": plan.co_powered_by_easyclaims,
     }
 
 

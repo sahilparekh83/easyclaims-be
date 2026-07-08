@@ -4,17 +4,45 @@ from typing import List
 from fastapi import HTTPException
 from ..db.queries.partner_query import PartnerQuery
 from ..db.queries.user_query import UserQuery
+from ..db.queries.partner_type_query import PartnerTypeQuery
 from ..db.models.partner import Partner
 from ..schemas.partner import PartnerCreate, PartnerUpdate
 from ..constants import UserType
 
 logger = logging.getLogger("easyclaims")
 
+_PARTNER_CODE_PREFIX = "ECPTR"
+
+
+def _generate_partner_code(query: PartnerQuery) -> str:
+    """Auto-generate a unique partner code: fixed 'ECPTR' prefix + sequential
+    number, e.g. 'ECPTR-0001'. Only the number changes between partners."""
+    n = 1
+    while True:
+        code = f"{_PARTNER_CODE_PREFIX}-{n:04d}"
+        if not query.get_by_code(code):
+            return code
+        n += 1
+
 
 class PartnerService:
     def __init__(self):
         self.query = PartnerQuery()
         self.user_query = UserQuery()
+        self.partner_type_query = PartnerTypeQuery()
+
+    def resolve_partner_type(self, value: str):
+        """Case-insensitive lookup of free-text partner_type (name or code) against
+        the managed partner_types table. Raises 422 if it doesn't match an active type."""
+        pt = self.partner_type_query.get_by_name_or_code(value)
+        if not pt:
+            active = self.partner_type_query.list_all(active_only=True)
+            allowed = ", ".join(sorted(p.name for p in active))
+            raise HTTPException(
+                status_code=422,
+                detail=f"Invalid partner type: '{value}'. Must be one of: {allowed}",
+            )
+        return pt
 
     def list_all(self, skip: int = 0, limit: int = 100) -> List[Partner]:
         return self.query.list_all(skip=skip, limit=limit)
@@ -43,9 +71,12 @@ class PartnerService:
             user_type=UserType.PARTNER, mobile_no=data.mobile_no,
         )
         api_key = str(uuid.uuid4()).replace("-", "")
+        partner_type_row = self.resolve_partner_type(data.partner_type)
         partner = self.query.create(
             user_id=str(user.id), name=data.name,
-            partner_type=data.partner_type, city=data.city, api_key=api_key,
+            partner_code=_generate_partner_code(self.query),
+            partner_type=partner_type_row.name, partner_type_id=str(partner_type_row.id),
+            city=data.city, api_key=api_key,
             state=data.state,
             legal_company_name=data.legal_company_name,
             trade_name=data.trade_name,
@@ -94,6 +125,10 @@ class PartnerService:
     def update(self, partner_id: str, data: PartnerUpdate) -> Partner:
         self.get_by_id(partner_id)
         kwargs = data.model_dump(exclude_none=True)
+        if "partner_type" in kwargs:
+            partner_type_row = self.resolve_partner_type(kwargs["partner_type"])
+            kwargs["partner_type"] = partner_type_row.name
+            kwargs["partner_type_id"] = str(partner_type_row.id)
         p = self.query.update(partner_id, **kwargs)
         if not p:
             raise HTTPException(status_code=404, detail="Partner not found")

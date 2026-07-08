@@ -14,8 +14,10 @@ class Partner(Base):
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), unique=True, nullable=False)
+    partner_code = Column(String, nullable=False, unique=True)
     name = Column(String, nullable=False)
-    partner_type = Column(String, nullable=False, default="Broker")
+    partner_type = Column(String, nullable=False, default="Other")
+    partner_type_id = Column(UUID(as_uuid=True), ForeignKey("partner_types.id"), nullable=True)
     city = Column(String, nullable=True)
     state = Column(String, nullable=True)
     # New onboarding fields

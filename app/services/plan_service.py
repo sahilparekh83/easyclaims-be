@@ -1,3 +1,4 @@
+import re
 from typing import List
 from fastapi import HTTPException
 from ..db.queries.plan_query import PlanQuery
@@ -18,6 +19,19 @@ def _benefits_to_db(b) -> dict:
         "benefit_emergency_assist": b.emergency_assist,
         "benefit_legal_assist": b.legal_assist,
     }
+
+
+def _generate_plan_code(name: str, query: PlanQuery) -> str:
+    """Auto-generate a unique plan code from the plan name, e.g.
+    'EbixCash Insurance Assistance Membership' -> 'EIAM-001'."""
+    words = re.findall(r"[A-Za-z0-9]+", name)
+    initials = "".join(w[0] for w in words if w).upper()[:6] or "PLAN"
+    n = 1
+    while True:
+        code = f"{initials}-{n:03d}"
+        if not query.get_by_code(code):
+            return code
+        n += 1
 
 
 class PlanService:
@@ -43,10 +57,17 @@ class PlanService:
         if self.query.get_by_name(data.name):
             raise HTTPException(status_code=409, detail="Plan name already exists")
         kwargs = {
-            "name": data.name, "tagline": data.tagline, "info_text": data.info_text,
+            "name": data.name, "plan_code": _generate_plan_code(data.name, self.query),
+            "tagline": data.tagline, "info_text": data.info_text,
             "price": data.price, "cycle": data.cycle, "plan_type": data.plan_type,
             "status": data.status, "color": data.color, "popular": data.popular,
             "max_claim_value": data.max_claim_value,
+            "fee_slabs": [s.model_dump() for s in data.fee_slabs],
+            "basic_features_note": data.basic_features_note,
+            "basic_features": data.basic_features,
+            "advanced_features_note": data.advanced_features_note,
+            "advanced_features": data.advanced_features,
+            "co_powered_by_easyclaims": data.co_powered_by_easyclaims,
             **_benefits_to_db(data.benefits),
         }
         return self.query.create(**kwargs)

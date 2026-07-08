@@ -9,6 +9,7 @@ from .partner import partner_router
 from .member import member_router
 from ..schemas.base import ResponseModel
 from ..services.policy_type_service import PolicyTypeService
+from ..services.partner_type_service import PartnerTypeService
 
 api_router = APIRouter()
 api_router.include_router(auth_router, prefix="/auth", tags=["Auth"])
@@ -24,6 +25,12 @@ api_router.include_router(webhook_main_router, prefix="/webhook", tags=["Webhook
 @api_router.get("/policy-types", tags=["Policy Types"], response_model=ResponseModel)
 async def list_policy_types(request: Request):
     svc = PolicyTypeService()
+    return ResponseModel.ok(data=[svc.to_dict(pt) for pt in svc.list_all(active_only=True)])
+
+
+@api_router.get("/partner-types", tags=["Partner Types"], response_model=ResponseModel)
+async def list_partner_types(request: Request):
+    svc = PartnerTypeService()
     return ResponseModel.ok(data=[svc.to_dict(pt) for pt in svc.list_all(active_only=True)])
 
 

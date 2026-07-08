@@ -678,18 +678,6 @@ class MemberService:
         return self.q.list_family(user_id)
 
     def add_family_member(self, user_id: str, data: FamilyMemberCreate) -> FamilyMember:
-        # Enforce plan family limit
-        enrollments = self.q.list_enrollments(user_id)
-        if enrollments:
-            plan = self.plan_q.get_by_id(str(enrollments[0].plan_id))
-            limit = plan.benefit_family if plan else 999
-            current = len(self.q.list_family(user_id))
-            if current >= limit:
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"Your plan allows a maximum of {limit} family member(s). "
-                           f"You have already added {current}."
-                )
         return self.q.create_family_member(user_id, **data.model_dump())
 
     def _family_policy_count(self, family_member_id: str) -> int:

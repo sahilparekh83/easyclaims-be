@@ -1,15 +1,20 @@
-from typing import Optional
+from typing import List, Optional
 from pydantic import BaseModel, field_validator
+
+
+class FeeSlabSchema(BaseModel):
+    slab: str
+    fee: str
 
 
 class BenefitsSchema(BaseModel):
     family: int = 2
     slots: int = 3
     claim: str = "Standard"
-    aiqa: bool = True
+    aiqa: bool = False
     aicalls: bool = False
     voice: str = "English"
-    vault: bool = True
+    vault: bool = False
     rm: bool = False
     concierge: bool = False
     teleconsult_sessions: int = 0
@@ -53,12 +58,18 @@ class PlanCreate(BaseModel):
     info_text: Optional[str] = None
     price: int
     cycle: str = "Annual"
-    plan_type: str = "global"
+    plan_type: str = "partner"
     status: str = "Draft"
     color: Optional[str] = "var(--blue-500)"
     popular: bool = False
     max_claim_value: Optional[int] = None
     benefits: BenefitsSchema = BenefitsSchema()
+    fee_slabs: List[FeeSlabSchema] = []
+    basic_features_note: str = ""
+    basic_features: List[str] = []
+    advanced_features_note: str = ""
+    advanced_features: List[str] = []
+    co_powered_by_easyclaims: bool = True
 
     @field_validator("max_claim_value")
     @classmethod
@@ -101,6 +112,12 @@ class PlanUpdate(BaseModel):
     popular: Optional[bool] = None
     max_claim_value: Optional[int] = None
     benefits: Optional[BenefitsSchema] = None
+    fee_slabs: Optional[List[FeeSlabSchema]] = None
+    basic_features_note: Optional[str] = None
+    basic_features: Optional[List[str]] = None
+    advanced_features_note: Optional[str] = None
+    advanced_features: Optional[List[str]] = None
+    co_powered_by_easyclaims: Optional[bool] = None
 
     @field_validator("status")
     @classmethod

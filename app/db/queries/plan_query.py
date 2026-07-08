@@ -25,6 +25,15 @@ class PlanQuery:
                 session.expunge(p)
             return p
 
+    def get_by_code(self, plan_code: str) -> Optional[MembershipPlan]:
+        with session_scope() as session:
+            p = session.query(MembershipPlan).filter(
+                MembershipPlan.plan_code == plan_code
+            ).first()
+            if p:
+                session.expunge(p)
+            return p
+
     def list_all(self, skip: int = 0, limit: int = 100) -> List[MembershipPlan]:
         with session_scope() as session:
             plans = session.query(MembershipPlan).filter(
