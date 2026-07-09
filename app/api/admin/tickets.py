@@ -4,7 +4,7 @@ from ...schemas.base import ResponseModel
 from ...db.queries.ticket_query import TicketQuery
 from ...db.queries.user_query import UserQuery
 from ...db.queries.partner_query import PartnerQuery
-from ..users import _require_superadmin
+from ..deps import require_permission
 
 admin_tickets_router = APIRouter()
 
@@ -38,7 +38,7 @@ async def list_tickets(
     limit: int = 50,
     status: str = None,
     category: str = None,
-    _=Depends(_require_superadmin),
+    _=Depends(require_permission("tickets", "view")),
 ):
     """AI Review Queue — list tickets raised via Claim Assistant / WhatsApp / Email."""
     tq = TicketQuery()
@@ -72,7 +72,7 @@ async def list_tickets(
 
 @admin_tickets_router.patch("/{ticket_id}/status", response_model=ResponseModel)
 async def update_ticket_status(ticket_id: UUID, status: str, request: Request,
-                               _=Depends(_require_superadmin)):
+                               _=Depends(require_permission("tickets", "edit"))):
     if status not in _VALID_STATUSES:
         raise HTTPException(status_code=422, detail=f"status must be one of {_VALID_STATUSES}")
     if not TicketQuery().update_status(str(ticket_id), status):

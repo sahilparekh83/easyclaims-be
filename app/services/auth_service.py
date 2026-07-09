@@ -19,7 +19,8 @@ class AuthService:
     def _get_key_bytes(self) -> bytes:
         return bytes.fromhex(self.settings.JWE_SECRET_KEY)
 
-    def create_access_token(self, user_id: str, email: str, user_type: str, roles: list) -> tuple:
+    def create_access_token(self, user_id: str, email: str, user_type: str, roles: list,
+                            permissions: list = None) -> tuple:
         jti = str(uuid.uuid4())
         exp = datetime.now(timezone.utc) + timedelta(seconds=self.settings.ACCESS_TOKEN_EXPIRE_SECONDS)
         payload = {
@@ -27,6 +28,7 @@ class AuthService:
             "email": email,
             "user_type": user_type,
             "roles": roles,
+            "permissions": permissions or [],
             "jti": jti,
             "exp": exp.timestamp(),
             "type": "access",

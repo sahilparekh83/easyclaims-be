@@ -10,6 +10,7 @@ from .consent import member_consent_router
 from .policies import member_policies_router
 from .dashboard import member_dashboard_router
 from .notifications import member_notifications_router
+from .claims import member_claims_router
 
 member_router = APIRouter()
 member_router.include_router(member_partners_router, prefix="/partners", tags=["Member - Partners"])
@@ -23,3 +24,4 @@ member_router.include_router(member_dashboard_router, prefix="/dashboard", tags=
 member_router.include_router(member_notifications_router, prefix="/notifications", tags=["Member - Notifications"])
 member_router.include_router(member_ai_router, prefix="/ai", tags=["Member - AI"])
 member_router.include_router(member_change_requests_router, prefix="/change-requests", tags=["Member - Change Requests"])
+member_router.include_router(member_claims_router, prefix="/claims", tags=["Member - Claims"])

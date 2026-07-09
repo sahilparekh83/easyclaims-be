@@ -20,7 +20,7 @@ from ...db.queries.policy_query import PolicyQuery
 from ...db.queries.policy_type_query import PolicyTypeQuery
 from ...db.queries.partner_type_query import PartnerTypeQuery
 from ...db.queries.plan_query import PlanQuery
-from ..users import _require_superadmin
+from ..deps import require_permission
 from ..plans import _plan_to_dict
 from fastapi import HTTPException
 
@@ -79,7 +79,7 @@ def _enrich(partners: list) -> list:
 async def list_partners(
     body: PartnerListRequest,
     request: Request,
-    _=Depends(_require_superadmin),
+    _=Depends(require_permission("partners", "view")),
 ):
     """
     Paginated partner list.
@@ -97,7 +97,7 @@ async def list_partners(
 
 
 @admin_partners_router.post("", response_model=ResponseModel, status_code=201)
-async def create_partner(body: PartnerCreate, request: Request, _=Depends(_require_superadmin)):
+async def create_partner(body: PartnerCreate, request: Request, _=Depends(require_permission("partners", "add"))):
     p = PartnerService().create(body)
     if body.plan_ids:
         from ...services.plan_service import PlanService
@@ -232,7 +232,7 @@ def _row_to_dict(row, col_idx: dict) -> dict:
 async def bulk_upload_partners(
     request: Request,
     file: UploadFile = File(...),
-    _=Depends(_require_superadmin),
+    _=Depends(require_permission("partners", "add")),
 ):
     """
     Upload an Excel file to bulk-create partners.
@@ -321,7 +321,7 @@ async def bulk_upload_partners(
 async def partner_bulk_upload_report(
     request: Request,
     file: UploadFile = File(...),
-    _=Depends(_require_superadmin),
+    _=Depends(require_permission("partners", "view")),
 ):
     """
     Dry-run the same file and return an annotated Excel with:
@@ -400,7 +400,7 @@ async def partner_bulk_upload_report(
 
 
 @admin_partners_router.get("/bulk-upload/sample")
-async def download_partner_sample_excel(_=Depends(_require_superadmin)):
+async def download_partner_sample_excel(_=Depends(require_permission("partners", "view"))):
     """Return a sample Excel file with the correct partner upload column headers."""
     from io import BytesIO
     from openpyxl.styles import Alignment
@@ -486,7 +486,7 @@ async def download_partner_sample_excel(_=Depends(_require_superadmin)):
 
 
 @admin_partners_router.get("/{partner_id}", response_model=ResponseModel)
-async def get_partner(partner_id: UUID, request: Request, _=Depends(_require_superadmin)):
+async def get_partner(partner_id: UUID, request: Request, _=Depends(require_permission("partners", "view"))):
     p = PartnerService().get_by_id(str(partner_id))
     user = UserQuery().get_user_by_id(str(p.user_id))
     return ResponseModel.ok(data=_partner_dict(p, user))
@@ -494,20 +494,20 @@ async def get_partner(partner_id: UUID, request: Request, _=Depends(_require_sup
 
 @admin_partners_router.patch("/{partner_id}", response_model=ResponseModel)
 async def update_partner(partner_id: UUID, body: PartnerUpdate, request: Request,
-                         _=Depends(_require_superadmin)):
+                         _=Depends(require_permission("partners", "edit"))):
     p = PartnerService().update(str(partner_id), body)
     user = UserQuery().get_user_by_id(str(p.user_id))
     return ResponseModel.ok(data=_partner_dict(p, user))
 
 
 @admin_partners_router.delete("/{partner_id}", response_model=ResponseModel)
-async def delete_partner(partner_id: UUID, request: Request, _=Depends(_require_superadmin)):
+async def delete_partner(partner_id: UUID, request: Request, _=Depends(require_permission("partners", "delete"))):
     PartnerService().delete(str(partner_id))
     return ResponseModel.ok(data={"message": "Partner deactivated"})
 
 
 @admin_partners_router.post("/{partner_id}/regenerate-key", response_model=ResponseModel)
-async def regen_key(partner_id: UUID, request: Request, _=Depends(_require_superadmin)):
+async def regen_key(partner_id: UUID, request: Request, _=Depends(require_permission("partners", "edit"))):
     p = PartnerService().regenerate_api_key(str(partner_id))
     return ResponseModel.ok(data={"api_key": p.api_key})
 
@@ -518,7 +518,7 @@ async def regen_key(partner_id: UUID, request: Request, _=Depends(_require_super
 
 @admin_partners_router.post("/{partner_id}/card-logo", response_model=ResponseModel, status_code=201)
 async def upload_card_logo(partner_id: UUID, request: Request,
-                           file: UploadFile = File(...), _=Depends(_require_superadmin)):
+                           file: UploadFile = File(...), _=Depends(require_permission("partners", "add"))):
     from ...storage import get_storage
     if file.content_type not in ("image/png", "image/jpeg", "image/jpg", "image/webp"):
         raise HTTPException(status_code=422, detail="Logo must be a PNG, JPEG, or WEBP image")
@@ -533,7 +533,7 @@ async def upload_card_logo(partner_id: UUID, request: Request,
 
 
 @admin_partners_router.get("/{partner_id}/card-logo/view")
-async def view_card_logo(partner_id: UUID, _=Depends(_require_superadmin)):
+async def view_card_logo(partner_id: UUID, _=Depends(require_permission("partners", "view"))):
     from fastapi import Response
     from ...storage import get_storage
     p = PartnerService().get_by_id(str(partner_id))
@@ -546,7 +546,7 @@ async def view_card_logo(partner_id: UUID, _=Depends(_require_superadmin)):
 
 
 @admin_partners_router.get("/{partner_id}/card-preview")
-async def preview_membership_card(partner_id: UUID, _=Depends(_require_superadmin)):
+async def preview_membership_card(partner_id: UUID, _=Depends(require_permission("partners", "view"))):
     """Download a Membership Card PDF with dummy placeholder values, rendered with
     this partner's current branding (logo + color) — so they can verify it before go-live."""
     from fastapi import Response
@@ -594,13 +594,13 @@ async def preview_membership_card(partner_id: UUID, _=Depends(_require_superadmi
 
 
 @admin_partners_router.get("/{partner_id}/plans", response_model=ResponseModel)
-async def partner_plans(partner_id: UUID, request: Request, _=Depends(_require_superadmin)):
+async def partner_plans(partner_id: UUID, request: Request, _=Depends(require_permission("partners", "view"))):
     plans = PlanService().list_for_partner(str(partner_id))
     return ResponseModel.ok(data=[_plan_to_dict(p) for p in plans])
 
 
 @admin_partners_router.get("/{partner_id}/plans-overview", response_model=ResponseModel)
-async def partner_plans_overview(partner_id: UUID, request: Request, _=Depends(_require_superadmin)):
+async def partner_plans_overview(partner_id: UUID, request: Request, _=Depends(require_permission("partners", "view"))):
     """All active plans with linked status and member count for this partner."""
     from ...db.models.plan import MembershipPlan
     from ...db.models.partner import PartnerPlan
@@ -648,7 +648,7 @@ async def partner_plans_overview(partner_id: UUID, request: Request, _=Depends(_
 
 @admin_partners_router.post("/{partner_id}/members/list", response_model=ResponseModel)
 async def list_partner_members(
-    partner_id: UUID, body: MemberListRequest, request: Request, _=Depends(_require_superadmin)
+    partner_id: UUID, body: MemberListRequest, request: Request, _=Depends(require_permission("partners", "view"))
 ):
     """Members enrolled under a specific partner, with their plan and policy count."""
     mq = MemberQuery()
@@ -687,7 +687,7 @@ async def list_partner_notifications(
     request: Request,
     skip: int = 0,
     limit: int = 50,
-    _=Depends(_require_superadmin),
+    _=Depends(require_permission("partners", "view")),
 ):
     """Admin: list notifications sent to a specific partner."""
     pq = PartnerQuery()
@@ -721,7 +721,7 @@ async def list_partner_notifications(
 async def mark_partner_notifications_read(
     partner_id: UUID,
     request: Request,
-    _=Depends(_require_superadmin),
+    _=Depends(require_permission("partners", "edit")),
 ):
     """Admin marks all notifications for a partner as read."""
     pq = PartnerQuery()
@@ -735,7 +735,7 @@ async def mark_partner_notifications_read(
 
 
 @admin_partners_router.post("/{partner_id}/members", response_model=ResponseModel, status_code=201)
-async def admin_add_member_to_partner(partner_id: UUID, request: Request, _=Depends(_require_superadmin)):
+async def admin_add_member_to_partner(partner_id: UUID, request: Request, _=Depends(require_permission("partners", "add"))):
     """Admin adds a new member to a specific partner."""
     import json as _json
     from ...schemas.member import MemberCreate
@@ -784,34 +784,32 @@ _MEMBER_COL_MAP = {
     "data 2": "data2", "data2": "data2",
     "data 3": "data3", "data3": "data3",
     "plan": "plan_name", "plan name": "plan_name",
+    "plan code": "plan_code", "plancode": "plan_code",
 }
 
-_MEMBER_MANDATORY = {"email", "name", "mobile_no"}
+_MEMBER_MANDATORY = {"email", "name", "mobile_no", "plan_code"}
 
 
-def _resolve_plan_for_row(partner_id: str, plan_name: Optional[str], default_plan_id: Optional[str]) -> tuple:
-    """Resolve the plan to enroll this row into. Row's own 'Plan Name' column wins;
-    falls back to the upload's default plan if the row doesn't specify one.
+def _resolve_plan_for_row(partner_id: str, plan_code: Optional[str]) -> tuple:
+    """Resolve the plan to enroll this row into via its mandatory 'Plan Code' column.
     Returns (plan_id, error_message)."""
     from ...db.queries.plan_query import PlanQuery
     from ...db.models.partner import PartnerPlan
     from ...db.session import session_scope
 
-    if plan_name:
-        plan = PlanQuery().get_by_name(plan_name)
-        if not plan or plan.status != "Active":
-            return None, f"Plan '{plan_name}' not found or not active"
-        if plan.plan_type == "partner":
-            with session_scope() as s:
-                linked = s.query(PartnerPlan).filter(
-                    PartnerPlan.partner_id == partner_id, PartnerPlan.plan_id == plan.id,
-                ).first()
-            if not linked:
-                return None, f"Plan '{plan_name}' is not available to this partner"
-        return str(plan.id), None
-    if default_plan_id:
-        return default_plan_id, None
-    return None, "Plan is required — add a value in the 'Plan Name' column, or select a default plan before uploading"
+    if not plan_code:
+        return None, "Plan Code is required"
+    plan = PlanQuery().get_by_code(plan_code)
+    if not plan or plan.status != "Active":
+        return None, f"Plan Code '{plan_code}' not found or not active"
+    if plan.plan_type == "partner":
+        with session_scope() as s:
+            linked = s.query(PartnerPlan).filter(
+                PartnerPlan.partner_id == partner_id, PartnerPlan.plan_id == plan.id,
+            ).first()
+        if not linked:
+            return None, f"Plan Code '{plan_code}' is not assigned to this partner"
+    return str(plan.id), None
 _MEMBER_MOB_RE = re.compile(r"^\+?[\d\s\-()]{7,15}$")
 _MEMBER_PIN_RE = re.compile(r"^\d{6}$")
 
@@ -865,9 +863,8 @@ def _member_row_to_dict(row, col_idx: dict) -> dict:
 async def admin_bulk_upload_members_to_partner(
     partner_id: UUID,
     file: UploadFile = File(...),
-    plan_id: Optional[str] = Form(None),
     request: Request = None,
-    _=Depends(_require_superadmin),
+    _=Depends(require_permission("partners", "add")),
 ):
     """Admin bulk uploads members to a specific partner from Excel."""
     from ...services.member_service import MemberService
@@ -891,7 +888,7 @@ async def admin_bulk_upload_members_to_partner(
             results["errors"].append({"row": row_num, "email": rd.get("email"), "errors": row_errors})
             continue
         email = rd["email"]
-        resolved_plan_id, plan_error = _resolve_plan_for_row(str(partner_id), rd.get("plan_name"), plan_id)
+        resolved_plan_id, plan_error = _resolve_plan_for_row(str(partner_id), rd.get("plan_code"))
         if plan_error:
             results["errors"].append({"row": row_num, "email": email, "errors": [plan_error]})
             continue
@@ -937,22 +934,22 @@ async def admin_bulk_upload_members_to_partner(
 
 
 @admin_partners_router.get("/{partner_id}/members/bulk-upload/sample")
-async def admin_member_bulk_sample(partner_id: UUID, _=Depends(_require_superadmin)):
+async def admin_member_bulk_sample(partner_id: UUID, _=Depends(require_permission("partners", "view"))):
     """Return a sample Excel for member bulk upload."""
     from openpyxl.styles import Alignment
     from ...db.queries.plan_query import PlanQuery
 
     available_plans = PlanQuery().list_for_partner(str(partner_id), active_only=True)
-    sample_plan_name = available_plans[0].name if available_plans else "Gold Plan"
+    sample_plan_code = available_plans[0].plan_code if available_plans else "PLN001"
 
     HEADERS = [
-        "Email ID", "Name", "Mobile Number", "Gender", "Plan Name",
+        "Email ID", "Name", "Mobile Number", "Gender", "Plan Code",
         "Address", "City", "State", "PIN Code",
         "Sale Date", "Sales Channel", "Branch Code", "Salesperson Name", "Employee Code",
         "Data 1", "Data 2", "Data 3",
     ]
     SAMPLE = [
-        "john.doe@example.com", "John Doe", "9876543210", "Male", sample_plan_name,
+        "john.doe@example.com", "John Doe", "9876543210", "Male", sample_plan_code,
         "123 MG Road", "Mumbai", "Maharashtra", "400001",
         "2024-01-15", "Direct", "BRN001", "Jane Smith", "EMP123",
         "", "", "",
@@ -971,6 +968,22 @@ async def admin_member_bulk_sample(partner_id: UUID, _=Depends(_require_superadm
     for col_num, v in enumerate(SAMPLE, start=1):
         ws.cell(row=2, column=col_num, value=v)
 
+    ws2 = wb.create_sheet("Partner Plans")
+    plan_headers = ["Plan Name", "Plan Code", "Status"]
+    for col_num, h in enumerate(plan_headers, start=1):
+        cell = ws2.cell(row=1, column=col_num, value=h)
+        cell.font = Font(bold=True, color="FFFFFF")
+        cell.fill = hdr_fill
+        cell.alignment = Alignment(horizontal="center")
+        ws2.column_dimensions[cell.column_letter].width = max(len(h) + 4, 18)
+    if available_plans:
+        for row_num, plan in enumerate(available_plans, start=2):
+            ws2.cell(row=row_num, column=1, value=plan.name)
+            ws2.cell(row=row_num, column=2, value=plan.plan_code)
+            ws2.cell(row=row_num, column=3, value=plan.status)
+    else:
+        ws2.cell(row=2, column=1, value="No active plans are assigned to this partner yet.")
+
     buf = io.BytesIO()
     wb.save(buf)
     buf.seek(0)
@@ -985,7 +998,7 @@ async def admin_member_bulk_sample(partner_id: UUID, _=Depends(_require_superadm
 async def admin_member_bulk_report(
     partner_id: UUID,
     file: UploadFile = File(...),
-    _=Depends(_require_superadmin),
+    _=Depends(require_permission("partners", "view")),
 ):
     """Dry-run member upload and return annotated Excel with error rows highlighted red."""
     contents = await file.read()
@@ -1050,7 +1063,7 @@ async def admin_member_bulk_report(
 
 @admin_partners_router.post("/{partner_id}/policies/list", response_model=ResponseModel)
 async def list_partner_policies(
-    partner_id: UUID, body: PolicyListRequest, request: Request, _=Depends(_require_superadmin)
+    partner_id: UUID, body: PolicyListRequest, request: Request, _=Depends(require_permission("partners", "view"))
 ):
     """Policies uploaded under a specific partner, with member info."""
     pq = PolicyQuery()
@@ -1113,7 +1126,7 @@ class CRReviewBody(BaseModel):
 async def list_partner_change_requests(
     partner_id: UUID, request: Request,
     status: str = None, skip: int = 0, limit: int = 50,
-    _=Depends(_require_superadmin),
+    _=Depends(require_permission("partners", "view")),
 ):
     pq = PartnerQuery()
     total, rows = pq.list_change_requests(
@@ -1127,7 +1140,7 @@ async def list_partner_change_requests(
 
 @admin_partners_router.post("/change-requests/{cr_id}/approve", response_model=ResponseModel)
 async def approve_partner_change_request(
-    cr_id: str, body: CRReviewBody, request: Request, _=Depends(_require_superadmin)
+    cr_id: str, body: CRReviewBody, request: Request, _=Depends(require_permission("partners", "edit"))
 ):
     admin_id = request.state.user_id if hasattr(request.state, "user_id") else "admin"
     cr = PartnerService().approve_change_request(cr_id, admin_id=admin_id, admin_note=body.admin_note)
@@ -1136,7 +1149,7 @@ async def approve_partner_change_request(
 
 @admin_partners_router.post("/change-requests/{cr_id}/reject", response_model=ResponseModel)
 async def reject_partner_change_request(
-    cr_id: str, body: CRReviewBody, request: Request, _=Depends(_require_superadmin)
+    cr_id: str, body: CRReviewBody, request: Request, _=Depends(require_permission("partners", "edit"))
 ):
     admin_id = request.state.user_id if hasattr(request.state, "user_id") else "admin"
     cr = PartnerService().reject_change_request(cr_id, admin_id=admin_id, admin_note=body.admin_note)

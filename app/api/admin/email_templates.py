@@ -4,7 +4,7 @@ from typing import Optional
 from ...schemas.base import ResponseModel
 from ...db.queries.email_template_query import EmailTemplateQuery
 from ...db.queries.partner_query import PartnerQuery
-from ..users import _require_superadmin
+from ..deps import require_permission
 
 admin_email_templates_router = APIRouter()
 
@@ -41,7 +41,7 @@ def _tpl_dict(t, partner_name: str = None) -> dict:
 
 
 @admin_email_templates_router.get("", response_model=ResponseModel)
-async def list_templates(request: Request, _=Depends(_require_superadmin)):
+async def list_templates(request: Request, _=Depends(require_permission("email_templates", "view"))):
     """Lists system default templates only. Use /{slug}/overrides for a slug's partner overrides."""
     tq = EmailTemplateQuery()
     templates = tq.list_all()
@@ -49,7 +49,7 @@ async def list_templates(request: Request, _=Depends(_require_superadmin)):
 
 
 @admin_email_templates_router.get("/{template_id}", response_model=ResponseModel)
-async def get_template(template_id: str, request: Request, _=Depends(_require_superadmin)):
+async def get_template(template_id: str, request: Request, _=Depends(require_permission("email_templates", "view"))):
     tq = EmailTemplateQuery()
     t = tq.get_by_id(template_id)
     if not t:
@@ -63,7 +63,7 @@ async def get_template(template_id: str, request: Request, _=Depends(_require_su
 
 @admin_email_templates_router.patch("/{template_id}", response_model=ResponseModel)
 async def update_template(template_id: str, body: TemplateUpdate,
-                          request: Request, _=Depends(_require_superadmin)):
+                          request: Request, _=Depends(require_permission("email_templates", "edit"))):
     tq = EmailTemplateQuery()
     kwargs = body.model_dump(exclude_none=True)
     if not kwargs:
@@ -79,7 +79,7 @@ async def update_template(template_id: str, body: TemplateUpdate,
 # that email slug to that partner's members. No override = system default is used.
 
 @admin_email_templates_router.get("/{slug}/overrides", response_model=ResponseModel)
-async def list_overrides(slug: str, request: Request, _=Depends(_require_superadmin)):
+async def list_overrides(slug: str, request: Request, _=Depends(require_permission("email_templates", "view"))):
     tq = EmailTemplateQuery()
     pq = PartnerQuery()
     overrides = tq.list_overrides_for_slug(slug)
@@ -91,7 +91,7 @@ async def list_overrides(slug: str, request: Request, _=Depends(_require_superad
 
 
 @admin_email_templates_router.post("/{slug}/overrides", response_model=ResponseModel, status_code=201)
-async def create_override(slug: str, body: OverrideCreate, request: Request, _=Depends(_require_superadmin)):
+async def create_override(slug: str, body: OverrideCreate, request: Request, _=Depends(require_permission("email_templates", "add"))):
     pq = PartnerQuery()
     partner = pq.get_by_id(body.partner_id)
     if not partner:
@@ -109,7 +109,7 @@ async def create_override(slug: str, body: OverrideCreate, request: Request, _=D
 
 
 @admin_email_templates_router.delete("/overrides/{template_id}", response_model=ResponseModel)
-async def delete_override(template_id: str, request: Request, _=Depends(_require_superadmin)):
+async def delete_override(template_id: str, request: Request, _=Depends(require_permission("email_templates", "delete"))):
     tq = EmailTemplateQuery()
     if not tq.delete_override(template_id):
         raise HTTPException(status_code=404, detail="Override not found (or this is a system default template, which cannot be deleted)")

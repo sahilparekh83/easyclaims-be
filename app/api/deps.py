@@ -5,6 +5,27 @@ from ..services.member_service import MemberService
 from ..constants import UserType
 
 
+def _is_superadmin(payload: dict) -> bool:
+    return payload.get("user_type") == UserType.SUPERADMIN.value or "SUPERADMIN" in payload.get("roles", [])
+
+
+def require_permission(module: str, action: str):
+    """Dependency factory for the dynamic RBAC grid: e.g. Depends(require_permission("partners", "edit")).
+    SUPERADMIN always bypasses — it's the one role that can never be locked out.
+    Everyone else must have '{module}:{action}' in the permission set baked into their JWT at login."""
+    def _dep(request: Request):
+        payload = getattr(request.state, "user_payload", None)
+        if not payload:
+            raise HTTPException(status_code=403, detail="Not authenticated")
+        if _is_superadmin(payload):
+            return payload
+        key = f"{module}:{action}"
+        if key not in (payload.get("permissions") or []):
+            raise HTTPException(status_code=403, detail=f"Missing permission: {key}")
+        return payload
+    return _dep
+
+
 def _require_partner(request: Request):
     payload = getattr(request.state, "user_payload", None)
     if not payload:

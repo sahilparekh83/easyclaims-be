@@ -14,6 +14,7 @@ from .settings import admin_settings_router
 from .audit_logs import admin_audit_router
 from .tickets import admin_tickets_router
 from .finance import admin_finance_router
+from .claims import admin_claims_router
 
 admin_router = APIRouter()
 admin_router.include_router(admin_plans_router, prefix="/plans", tags=["Admin - Plans"])
@@ -31,3 +32,4 @@ admin_router.include_router(admin_settings_router, prefix="/settings", tags=["Ad
 admin_router.include_router(admin_audit_router, prefix="/audit-logs", tags=["Admin - Audit Logs"])
 admin_router.include_router(admin_tickets_router, prefix="/tickets", tags=["Admin - Tickets"])
 admin_router.include_router(admin_finance_router, prefix="/finance", tags=["Admin - Finance"])
+admin_router.include_router(admin_claims_router, prefix="/claims", tags=["Admin - Claims"])

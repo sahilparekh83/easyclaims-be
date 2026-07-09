@@ -6,7 +6,7 @@ from ...schemas.base import ResponseModel
 from ...db.queries.float_query import FloatQuery
 from ...db.queries.partner_query import PartnerQuery
 from ...services.notification_helper import notify_partner
-from ..users import _require_superadmin
+from ..deps import require_permission
 
 admin_finance_router = APIRouter()
 
@@ -36,7 +36,7 @@ def _txn_dict(t, partner_name=None) -> dict:
 
 
 @admin_finance_router.post("/topup", response_model=ResponseModel, status_code=201)
-async def top_up_partner(body: TopUpBody, request: Request, _=Depends(_require_superadmin)):
+async def top_up_partner(body: TopUpBody, request: Request, _=Depends(require_permission("finance", "add"))):
     """Admin credits a partner's prepaid float balance (billing entry)."""
     admin_id = request.state.user_payload.get("sub") if hasattr(request.state, "user_payload") else None
     pq = PartnerQuery()
@@ -68,7 +68,7 @@ async def list_ledger(
     partner_id: Optional[str] = None,
     is_reconciled: Optional[bool] = None,
     type: Optional[str] = None,
-    _=Depends(_require_superadmin),
+    _=Depends(require_permission("finance", "view")),
 ):
     """Billing/Reconciliation ledger — every float top-up and per-enrollment deduction."""
     fq = FloatQuery()
@@ -90,7 +90,7 @@ async def list_ledger(
 
 @admin_finance_router.patch("/ledger/{transaction_id}/reconcile", response_model=ResponseModel)
 async def reconcile_transaction(transaction_id: UUID, request: Request,
-                                _=Depends(_require_superadmin)):
+                                _=Depends(require_permission("finance", "edit"))):
     admin_id = request.state.user_payload.get("sub") if hasattr(request.state, "user_payload") else "admin"
     if not FloatQuery().mark_reconciled(str(transaction_id), admin_id):
         raise HTTPException(status_code=404, detail="Transaction not found")
@@ -98,7 +98,7 @@ async def reconcile_transaction(transaction_id: UUID, request: Request,
 
 
 @admin_finance_router.get("/dashboard", response_model=ResponseModel)
-async def finance_dashboard(request: Request, _=Depends(_require_superadmin)):
+async def finance_dashboard(request: Request, _=Depends(require_permission("finance", "view"))):
     """Finance Dashboard — Billing (top-ups/deductions), Reconciliation status, Float Utilization."""
     fq = FloatQuery()
     pq = PartnerQuery()

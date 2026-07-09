@@ -9,6 +9,7 @@ from ..services.email_service import EmailService
 from ..services.user_service import UserService
 from ..db.queries.user_query import UserQuery
 from ..db.queries.role_query import RoleQuery
+from ..db.queries.permission_query import PermissionQuery
 from ..configs.common import get_settings
 
 auth_router = APIRouter()
@@ -71,11 +72,13 @@ async def verify_otp(body: VerifyOTPRequest, response: Response):
         raise HTTPException(status_code=401, detail="Invalid or expired OTP")
 
     roles = role_query.get_user_roles(str(user.id))
+    permissions = PermissionQuery().get_keys_for_roles(roles)
     access_token, jti = auth_service.create_access_token(
         user_id=str(user.id),
         email=str(user.email),
         user_type=user.user_type.value,
         roles=roles,
+        permissions=permissions,
     )
     refresh_token = auth_service.create_refresh_token(user_id=str(user.id), jti=jti)
 
@@ -140,12 +143,14 @@ async def refresh_token(request: Request, response: Response):
         raise HTTPException(status_code=401, detail="User not found")
 
     roles = RoleQuery().get_user_roles(str(user.id))
+    permissions = PermissionQuery().get_keys_for_roles(roles)
 
     new_access_token, new_jti = auth_service.create_access_token(
         user_id=str(user.id),
         email=str(user.email),
         user_type=user.user_type.value,
         roles=roles,
+        permissions=permissions,
     )
     expires_at = datetime.now(timezone.utc) + timedelta(seconds=settings.ACCESS_TOKEN_EXPIRE_SECONDS)
     user_query.update_auth_session_jti(old_jti, new_jti, expires_at)

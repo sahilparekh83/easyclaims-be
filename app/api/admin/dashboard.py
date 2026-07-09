@@ -10,7 +10,7 @@ from ...db.models.partner import Partner
 from ...db.models.member import MemberEnrollment
 from ...db.models.policy import Policy
 from ...constants import UserType
-from ..users import _require_superadmin
+from ..deps import require_permission
 
 admin_dashboard_router = APIRouter()
 
@@ -22,7 +22,7 @@ MONTH_NAMES = ["Jan", "Feb", "Mar", "Apr", "May", "Jun",
 async def get_dashboard(
     request: Request,
     year: Optional[int] = Query(default=None),
-    _=Depends(_require_superadmin),
+    _=Depends(require_permission("dashboard", "view")),
 ):
     now = datetime.now(timezone.utc)
     target_year = year or now.year

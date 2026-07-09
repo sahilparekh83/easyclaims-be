@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, Request
 from ...schemas.base import ResponseModel
 from ...db.queries.audit_log_query import AuditLogQuery
-from ..users import _require_superadmin
+from ..deps import require_permission
 
 admin_audit_router = APIRouter()
 
@@ -14,7 +14,7 @@ async def list_audit_logs(
     actor_id: str = None,
     skip: int = 0,
     limit: int = 50,
-    _=Depends(_require_superadmin),
+    _=Depends(require_permission("audit_logs", "view")),
 ):
     total, rows = AuditLogQuery().list_paginated(
         entity_type=entity_type, entity_id=entity_id, actor_id=actor_id, skip=skip, limit=limit

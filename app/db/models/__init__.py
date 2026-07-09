@@ -1,5 +1,6 @@
 from .user import User, OTPLog, AuthSession
 from .roles import Role, UserRole
+from .permission import Permission, RolePermission
 from .plan import MembershipPlan
 from .partner import Partner, PartnerPlan, PartnerChangeRequest
 from .partner_type import PartnerType
@@ -14,9 +15,10 @@ from .llm_usage import LLMUsage
 from .audit_log import AuditLog
 from .ticket import Ticket
 from .float_transaction import FloatTransaction
+from .policy_claim import PolicyClaim, PolicyClaimDocument, ClaimActivityLog
 
 __all__ = [
-    "User", "OTPLog", "AuthSession", "Role", "UserRole",
+    "User", "OTPLog", "AuthSession", "Role", "UserRole", "Permission", "RolePermission",
     "MembershipPlan",
     "Partner", "PartnerPlan", "PartnerChangeRequest", "PartnerType",
     "MemberEnrollment", "MemberProfile", "FamilyMember", "Nominee", "DpdpConsent", "MemberChangeRequest",
@@ -29,4 +31,5 @@ __all__ = [
     "AuditLog",
     "Ticket",
     "FloatTransaction",
+    "PolicyClaim", "PolicyClaimDocument", "ClaimActivityLog",
 ]

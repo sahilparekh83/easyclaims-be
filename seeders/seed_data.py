@@ -228,6 +228,65 @@ EMAIL_TEMPLATES = [
 </body></html>""",
     },
     {
+        "slug": "claim_submitted_admin",
+        "description": "Sent to every SUPERADMIN when a member submits a policy claim",
+        "subject": "New Claim Submitted — {{ claim_number }}",
+        "html_body": """<html><body style="font-family:Arial,sans-serif;color:#222;max-width:600px;margin:0 auto">
+<div style="background:#0a2257;padding:20px 28px;border-radius:10px 10px 0 0">
+  <span style="color:#fff;font-size:20px;font-weight:800">EasyClaims</span>
+  <div style="color:#93c5fd;font-size:12px;margin-top:2px">Claim Notification</div>
+</div>
+<div style="background:#fff;border:1px solid #e2e8f0;border-top:none;padding:28px;border-radius:0 0 10px 10px">
+  <p>A new claim has been submitted and {{ agent_name }} has been auto-assigned.</p>
+  <table style="width:100%;border-collapse:collapse;background:#f0f9ff;border-radius:10px;overflow:hidden;margin:16px 0">
+    <tr style="background:#e0f2fe"><td style="padding:10px 16px;font-size:12px;color:#555;font-weight:600;width:160px">Claim Number</td><td style="padding:10px 16px;font-weight:700;font-family:monospace">{{ claim_number }}</td></tr>
+    <tr><td style="padding:10px 16px;font-size:12px;color:#555;font-weight:600">Member</td><td style="padding:10px 16px;font-size:13px">{{ member_name }}</td></tr>
+    <tr style="background:#e0f2fe"><td style="padding:10px 16px;font-size:12px;color:#555;font-weight:600">Policy</td><td style="padding:10px 16px;font-size:13px">{{ policy_number }}</td></tr>
+    <tr><td style="padding:10px 16px;font-size:12px;color:#555;font-weight:600">Assigned Agent</td><td style="padding:10px 16px;font-size:13px">{{ agent_name }}</td></tr>
+  </table>
+  <p style="color:#888;font-size:12px;margin-top:24px">— EasyClaims Team</p>
+</div>
+</body></html>""",
+    },
+    {
+        "slug": "claim_assigned_agent",
+        "description": "Sent to a claim agent when a claim is assigned or reassigned to them",
+        "subject": "Claim Assigned to You — {{ claim_number }}",
+        "html_body": """<html><body style="font-family:Arial,sans-serif;color:#222;max-width:600px;margin:0 auto">
+<div style="background:#0a2257;padding:20px 28px;border-radius:10px 10px 0 0">
+  <span style="color:#fff;font-size:20px;font-weight:800">EasyClaims</span>
+  <div style="color:#93c5fd;font-size:12px;margin-top:2px">Claim Assigned</div>
+</div>
+<div style="background:#fff;border:1px solid #e2e8f0;border-top:none;padding:28px;border-radius:0 0 10px 10px">
+  <p>Dear <strong>{{ agent_name }}</strong>,</p>
+  <p>A claim has been assigned to you for processing.</p>
+  <table style="width:100%;border-collapse:collapse;background:#f0f9ff;border-radius:10px;overflow:hidden;margin:16px 0">
+    <tr style="background:#e0f2fe"><td style="padding:10px 16px;font-size:12px;color:#555;font-weight:600;width:160px">Claim Number</td><td style="padding:10px 16px;font-weight:700;font-family:monospace">{{ claim_number }}</td></tr>
+    <tr><td style="padding:10px 16px;font-size:12px;color:#555;font-weight:600">Member</td><td style="padding:10px 16px;font-size:13px">{{ member_name }}</td></tr>
+    <tr style="background:#e0f2fe"><td style="padding:10px 16px;font-size:12px;color:#555;font-weight:600">Policy</td><td style="padding:10px 16px;font-size:13px">{{ policy_number }}</td></tr>
+  </table>
+  <p style="color:#888;font-size:12px;margin-top:24px">— EasyClaims Team</p>
+</div>
+</body></html>""",
+    },
+    {
+        "slug": "claim_status_update_member",
+        "description": "Sent to the member whenever their claim's status changes",
+        "subject": "Your Claim {{ claim_number }} is now {{ new_status }}",
+        "html_body": """<html><body style="font-family:Arial,sans-serif;color:#222;max-width:600px;margin:0 auto">
+<div style="background:#0a2257;padding:20px 28px;border-radius:10px 10px 0 0">
+  <span style="color:#fff;font-size:20px;font-weight:800">EasyClaims</span>
+  <div style="color:#93c5fd;font-size:12px;margin-top:2px">Claim Update</div>
+</div>
+<div style="background:#fff;border:1px solid #e2e8f0;border-top:none;padding:28px;border-radius:0 0 10px 10px">
+  <p>Dear <strong>{{ member_name }}</strong>,</p>
+  <p>Your claim <strong>{{ claim_number }}</strong> status has been updated to <strong>{{ new_status }}</strong>.</p>
+  {% if remark %}<p style="background:#f8fafc;border-left:3px solid #0a2257;padding:10px 14px;font-size:13px">{{ remark }}</p>{% endif %}
+  <p style="color:#888;font-size:12px;margin-top:24px">— EasyClaims Team</p>
+</div>
+</body></html>""",
+    },
+    {
         "slug": "membership_card",
         "description": "Membership card email sent after enrollment — PDF card attached, shows partner/plan/benefits",
         "subject": "Your EasyClaims Membership Card — {{ plan_name }}",
@@ -387,6 +446,38 @@ WHATSAPP_TEMPLATES = [
             "*Summary:* {{ summary }}\n\n"
             "Our team will follow up with you shortly.\n\n"
             "— EasyClaims Team"
+        ),
+    },
+    {
+        "slug": "wa_claim_assigned_agent",
+        "description": "Sent to a claim agent via WhatsApp when a claim is assigned or reassigned to them",
+        "html_body": (
+            "Hi {{ agent_name }}! 📋\n\n"
+            "A claim has been assigned to you.\n\n"
+            "*Claim Number:* {{ claim_number }}\n"
+            "*Member:* {{ member_name }}\n"
+            "*Policy:* {{ policy_number }}\n\n"
+            "— EasyClaims Team"
+        ),
+    },
+    {
+        "slug": "wa_claim_status_update_member",
+        "description": "Sent to the member via WhatsApp when their claim's status changes",
+        "html_body": (
+            "Hi {{ member_name }}! 📋\n\n"
+            "Your claim *{{ claim_number }}* is now *{{ new_status }}*.\n\n"
+            "{{ remark }}\n\n"
+            "— EasyClaims Team"
+        ),
+    },
+    {
+        "slug": "wa_claim_submitted_admin",
+        "description": "Sent to superadmins via WhatsApp when a new claim is submitted",
+        "html_body": (
+            "📋 New claim submitted\n\n"
+            "*Claim Number:* {{ claim_number }}\n"
+            "*Member:* {{ member_name }}\n"
+            "*Assigned Agent:* {{ agent_name }}"
         ),
     },
 ]

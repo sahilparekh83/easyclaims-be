@@ -16,7 +16,7 @@ from ...db.queries.partner_query import PartnerQuery
 from ...db.queries.enrollment_history_query import EnrollmentHistoryQuery
 from ...db.queries.plan_query import PlanQuery
 from ...db.queries.activity_query import PolicyFamilyQuery
-from ..users import _require_superadmin
+from ..deps import require_permission
 
 
 class SwitchPlanBody(BaseModel):
@@ -71,7 +71,7 @@ def _enrich_family(family_members):
 async def list_members(
     body: MemberListRequest,
     request: Request,
-    _=Depends(_require_superadmin),
+    _=Depends(require_permission("members", "view")),
 ):
     """
     Paginated member list.
@@ -132,7 +132,7 @@ async def list_members(
 
 
 @admin_members_router.post("", response_model=ResponseModel, status_code=201)
-async def create_member(body: MemberCreate, request: Request, _=Depends(_require_superadmin)):
+async def create_member(body: MemberCreate, request: Request, _=Depends(require_permission("members", "add"))):
     svc = MemberService()
     result = svc.create_member(body)
     user = result["user"]
@@ -153,28 +153,25 @@ async def create_member(body: MemberCreate, request: Request, _=Depends(_require
     })
 
 
-def _resolve_plan_for_row(partner_id: str, plan_name: Optional[str], default_plan_id: Optional[str]) -> tuple:
-    """Resolve the plan to enroll this row into. Row's own 'Plan Name' column wins;
-    falls back to the upload's default plan if the row doesn't specify one.
+def _resolve_plan_for_row(partner_id: str, plan_code: Optional[str]) -> tuple:
+    """Resolve the plan to enroll this row into via its mandatory 'Plan Code' column.
     Returns (plan_id, error_message)."""
     from ...db.models.partner import PartnerPlan
     from ...db.session import session_scope
 
-    if plan_name:
-        plan = PlanQuery().get_by_name(plan_name)
-        if not plan or plan.status != "Active":
-            return None, f"Plan '{plan_name}' not found or not active"
-        if plan.plan_type == "partner":
-            with session_scope() as s:
-                linked = s.query(PartnerPlan).filter(
-                    PartnerPlan.partner_id == partner_id, PartnerPlan.plan_id == plan.id,
-                ).first()
-            if not linked:
-                return None, f"Plan '{plan_name}' is not available to this partner"
-        return str(plan.id), None
-    if default_plan_id:
-        return default_plan_id, None
-    return None, "Plan is required — add a value in the 'Plan Name' column, or select a default plan before uploading"
+    if not plan_code:
+        return None, "Plan Code is required"
+    plan = PlanQuery().get_by_code(plan_code)
+    if not plan or plan.status != "Active":
+        return None, f"Plan Code '{plan_code}' not found or not active"
+    if plan.plan_type == "partner":
+        with session_scope() as s:
+            linked = s.query(PartnerPlan).filter(
+                PartnerPlan.partner_id == partner_id, PartnerPlan.plan_id == plan.id,
+            ).first()
+        if not linked:
+            return None, f"Plan Code '{plan_code}' is not assigned to this partner"
+    return str(plan.id), None
 
 
 @admin_members_router.post("/bulk-upload", response_model=ResponseModel, status_code=201)
@@ -182,8 +179,7 @@ async def bulk_upload_members(
     request: Request,
     file: UploadFile = File(...),
     partner_id: str = Form(...),
-    plan_id: Optional[str] = Form(None),
-    _=Depends(_require_superadmin),
+    _=Depends(require_permission("members", "add")),
 ):
     """
     Upload an Excel file with member rows. Expected columns (case-insensitive):
@@ -235,6 +231,7 @@ async def bulk_upload_members(
         "data 3": "data3", "data3": "data3",
         # plan
         "plan": "plan_name", "plan name": "plan_name",
+        "plan code": "plan_code", "plancode": "plan_code",
     }
     col_idx = {}
     for i, h in enumerate(header):
@@ -242,7 +239,7 @@ async def bulk_upload_members(
         if mapped:
             col_idx[mapped] = i
 
-    MANDATORY = {"name", "mobile_no", "email"}
+    MANDATORY = {"name", "mobile_no", "email", "plan_code"}
     missing_cols = MANDATORY - set(col_idx.keys())
     if missing_cols:
         raise HTTPException(status_code=422, detail=f"Missing mandatory columns: {missing_cols}")
@@ -268,13 +265,13 @@ async def bulk_upload_members(
         city = cell("address_city")
         state = cell("address_state")
         pin = cell("address_pin")
-        plan_name = cell("plan_name")
+        plan_code = cell("plan_code")
 
         if not email:
             results["skipped"].append({"row": row_num, "reason": "empty email"})
             continue
 
-        missing_mandatory = [f for f, v in [("name", name), ("mobile_no", mobile)] if not v]
+        missing_mandatory = [f for f, v in [("name", name), ("mobile_no", mobile), ("plan_code", plan_code)] if not v]
         if missing_mandatory:
             results["errors"].append({"row": row_num, "email": email, "reason": f"Missing: {missing_mandatory}"})
             continue
@@ -288,7 +285,7 @@ async def bulk_upload_members(
             except Exception:
                 pass
 
-        resolved_plan_id, plan_error = _resolve_plan_for_row(partner_id, plan_name, plan_id)
+        resolved_plan_id, plan_error = _resolve_plan_for_row(partner_id, plan_code)
         if plan_error:
             results["errors"].append({"row": row_num, "email": email, "reason": plan_error})
             continue
@@ -345,7 +342,7 @@ async def list_change_requests(
     entity_type: str = None,
     skip: int = 0,
     limit: int = 50,
-    _=Depends(_require_superadmin),
+    _=Depends(require_permission("members", "view")),
 ):
     mq = MemberQuery()
     uq = UserQuery()
@@ -379,7 +376,7 @@ class ReviewBody(BaseModel):
 
 
 @admin_members_router.post("/change-requests/{request_id}/approve", response_model=ResponseModel)
-async def approve_change_request(request_id: str, body: ReviewBody, request: Request, _=Depends(_require_superadmin)):
+async def approve_change_request(request_id: str, body: ReviewBody, request: Request, _=Depends(require_permission("members", "edit"))):
     admin_id = request.state.user_id if hasattr(request.state, "user_id") else "admin"
     ip = request.client.host if request.client else None
     svc = MemberService()
@@ -388,7 +385,7 @@ async def approve_change_request(request_id: str, body: ReviewBody, request: Req
 
 
 @admin_members_router.post("/change-requests/{request_id}/reject", response_model=ResponseModel)
-async def reject_change_request(request_id: str, body: ReviewBody, request: Request, _=Depends(_require_superadmin)):
+async def reject_change_request(request_id: str, body: ReviewBody, request: Request, _=Depends(require_permission("members", "edit"))):
     admin_id = request.state.user_id if hasattr(request.state, "user_id") else "admin"
     svc = MemberService()
     cr = svc.reject_change_request(request_id, admin_id=admin_id, admin_note=body.admin_note)
@@ -400,7 +397,7 @@ async def update_member(
     member_id: UUID,
     body: AdminMemberUpdate,
     request: Request,
-    _=Depends(_require_superadmin),
+    _=Depends(require_permission("members", "edit")),
 ):
     admin_id = request.state.user_id if hasattr(request.state, "user_id") else "admin"
     ip = request.client.host if request.client else None
@@ -411,7 +408,7 @@ async def update_member(
 
 @admin_members_router.patch("/{member_id}/plan", response_model=ResponseModel)
 async def switch_member_plan(member_id: UUID, body: SwitchPlanBody,
-                             request: Request, _=Depends(_require_superadmin)):
+                             request: Request, _=Depends(require_permission("members", "edit"))):
     """Admin switches a member's plan."""
     mq = MemberQuery()
     enrollments = mq.list_enrollments(str(member_id))
@@ -427,7 +424,7 @@ async def switch_member_plan(member_id: UUID, body: SwitchPlanBody,
 
 
 @admin_members_router.post("/{member_id}/enrollment/renew", response_model=ResponseModel)
-async def renew_member_enrollment(member_id: UUID, request: Request, _=Depends(_require_superadmin)):
+async def renew_member_enrollment(member_id: UUID, request: Request, _=Depends(require_permission("members", "edit"))):
     """Admin renews a member's enrollment for 1 more year."""
     mq = MemberQuery()
     enrollments = mq.list_enrollments(str(member_id))
@@ -446,7 +443,7 @@ async def renew_member_enrollment(member_id: UUID, request: Request, _=Depends(_
 
 @admin_members_router.post("/{member_id}/enrollment/cancel", response_model=ResponseModel)
 async def cancel_member_enrollment(member_id: UUID, body: CancelEnrollmentBody,
-                                   request: Request, _=Depends(_require_superadmin)):
+                                   request: Request, _=Depends(require_permission("members", "edit"))):
     """Admin cancels a member's membership — blocks further portal access."""
     mq = MemberQuery()
     enrollments = mq.list_enrollments(str(member_id))
@@ -463,7 +460,7 @@ async def cancel_member_enrollment(member_id: UUID, body: CancelEnrollmentBody,
 
 
 @admin_members_router.get("/{member_id}/enrollment/history", response_model=ResponseModel)
-async def get_member_enrollment_history(member_id: UUID, request: Request, _=Depends(_require_superadmin)):
+async def get_member_enrollment_history(member_id: UUID, request: Request, _=Depends(require_permission("members", "view"))):
     """Admin gets the enrollment plan change history for a member."""
     mq = MemberQuery()
     pq = PlanQuery()
@@ -487,7 +484,7 @@ async def get_member_enrollment_history(member_id: UUID, request: Request, _=Dep
 
 
 @admin_members_router.get("/{member_id}", response_model=ResponseModel)
-async def get_member(member_id: UUID, request: Request, _=Depends(_require_superadmin)):
+async def get_member(member_id: UUID, request: Request, _=Depends(require_permission("members", "view"))):
     uq = UserQuery()
     mq = MemberQuery()
     pq = PolicyQuery()

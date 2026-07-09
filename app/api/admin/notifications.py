@@ -2,7 +2,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Request
 from ...schemas.base import ResponseModel
 from ...db.queries.activity_query import NotificationQuery
-from ..users import _require_superadmin
+from ..deps import require_permission
 
 admin_notifications_router = APIRouter()
 
@@ -21,7 +21,7 @@ def _notif_dict(n) -> dict:
 
 
 @admin_notifications_router.get("/badge-counts", response_model=ResponseModel)
-async def badge_counts(request: Request, payload=Depends(_require_superadmin)):
+async def badge_counts(request: Request, payload=Depends(require_permission("notifications", "view"))):
     """Return total unread count for the admin sidebar bell badge."""
     user_id = request.state.user_payload["sub"]
     nq = NotificationQuery()
@@ -35,7 +35,7 @@ async def list_notifications(
     skip: int = 0,
     limit: int = 50,
     unread_only: bool = False,
-    payload=Depends(_require_superadmin),
+    payload=Depends(require_permission("notifications", "view")),
 ):
     """List notifications for this admin. Unread shown first."""
     user_id = request.state.user_payload["sub"]
@@ -52,7 +52,7 @@ async def list_notifications(
 
 
 @admin_notifications_router.patch("/{notification_id}/read", response_model=ResponseModel)
-async def mark_read(notification_id: UUID, request: Request, _=Depends(_require_superadmin)):
+async def mark_read(notification_id: UUID, request: Request, _=Depends(require_permission("notifications", "edit"))):
     user_id = request.state.user_payload["sub"]
     nq = NotificationQuery()
     if not nq.mark_read(str(notification_id), user_id):
@@ -61,7 +61,7 @@ async def mark_read(notification_id: UUID, request: Request, _=Depends(_require_
 
 
 @admin_notifications_router.patch("/read-all", response_model=ResponseModel)
-async def mark_all_read(request: Request, _=Depends(_require_superadmin)):
+async def mark_all_read(request: Request, _=Depends(require_permission("notifications", "edit"))):
     user_id = request.state.user_payload["sub"]
     nq = NotificationQuery()
     count = nq.mark_all_read(user_id)
@@ -70,7 +70,7 @@ async def mark_all_read(request: Request, _=Depends(_require_superadmin)):
 
 @admin_notifications_router.delete("/{notification_id}", response_model=ResponseModel)
 async def delete_notification(notification_id: UUID, request: Request,
-                               _=Depends(_require_superadmin)):
+                               _=Depends(require_permission("notifications", "delete"))):
     user_id = request.state.user_payload["sub"]
     nq = NotificationQuery()
     if not nq.delete(str(notification_id), user_id):

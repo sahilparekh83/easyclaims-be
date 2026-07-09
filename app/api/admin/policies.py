@@ -14,7 +14,7 @@ from ...db.queries.partner_query import PartnerQuery
 from ...db.queries.policy_type_query import PolicyTypeQuery
 from ...db.queries.member_query import MemberQuery
 from ...db.queries.activity_query import PolicyFamilyQuery, PolicyNomineeQuery
-from ..users import _require_superadmin
+from ..deps import require_permission
 
 logger = logging.getLogger("easyclaims")
 admin_policies_router = APIRouter()
@@ -59,7 +59,7 @@ def _policy_dict(p, member_name=None, member_email=None,
 async def list_policies(
     body: PolicyListRequest,
     request: Request,
-    _=Depends(_require_superadmin),
+    _=Depends(require_permission("policies", "view")),
 ):
     """
     Flat list of all policies with optional partner_id filter.
@@ -155,7 +155,7 @@ async def admin_upload_policy(
     vehicle_type: Optional[str] = Form(None),
     vehicle_owner_family_member_id: Optional[str] = Form(None),
     file: UploadFile = File(...),
-    _=Depends(_require_superadmin),
+    _=Depends(require_permission("policies", "add")),
 ):
     """Admin upload a policy for any member — triggers real AI extraction."""
     data = PolicyCreate(
@@ -180,7 +180,7 @@ async def admin_upload_policy(
 
 
 @admin_policies_router.delete("/{policy_id}", response_model=ResponseModel)
-async def delete_policy(policy_id: UUID, request: Request, _=Depends(_require_superadmin)):
+async def delete_policy(policy_id: UUID, request: Request, _=Depends(require_permission("policies", "delete"))):
     pq = PolicyQuery()
     policy = pq.get_by_id(str(policy_id))
     if not policy:
@@ -198,7 +198,7 @@ async def delete_policy(policy_id: UUID, request: Request, _=Depends(_require_su
 
 
 @admin_policies_router.get("/{policy_id}/view")
-async def view_policy_pdf(policy_id: UUID, request: Request, _=Depends(_require_superadmin)):
+async def view_policy_pdf(policy_id: UUID, request: Request, _=Depends(require_permission("policies", "view"))):
     """Stream policy PDF for inline viewing."""
     policy = PolicyService().get_policy_admin(str(policy_id))
     if not policy or not policy.storage_key:
@@ -212,7 +212,7 @@ async def view_policy_pdf(policy_id: UUID, request: Request, _=Depends(_require_
 
 
 @admin_policies_router.get("/{policy_id}/download")
-async def download_policy_pdf(policy_id: UUID, request: Request, _=Depends(_require_superadmin)):
+async def download_policy_pdf(policy_id: UUID, request: Request, _=Depends(require_permission("policies", "view"))):
     """Download policy PDF as attachment."""
     policy = PolicyService().get_policy_admin(str(policy_id))
     if not policy or not policy.storage_key:
@@ -226,7 +226,7 @@ async def download_policy_pdf(policy_id: UUID, request: Request, _=Depends(_requ
 
 
 @admin_policies_router.patch("/{policy_id}/fields", response_model=ResponseModel)
-async def update_policy_fields(policy_id: UUID, body: dict, _=Depends(_require_superadmin)):
+async def update_policy_fields(policy_id: UUID, body: dict, _=Depends(require_permission("policies", "edit"))):
     pq = PolicyQuery()
     policy = pq.get_by_id(str(policy_id))
     if not policy:
@@ -242,7 +242,7 @@ async def update_policy_fields(policy_id: UUID, body: dict, _=Depends(_require_s
 # Uncomment when manual review flow is re-enabled.
 # ---------------------------------------------------------------------------
 # @admin_policies_router.post("/{policy_id}/approve", response_model=ResponseModel)
-# async def approve_policy(policy_id: UUID, _=Depends(_require_superadmin)):
+# async def approve_policy(policy_id: UUID, _=Depends(require_permission("policies", "edit"))):
 #     pq = PolicyQuery()
 #     uq = UserQuery()
 #     policy = pq.get_by_id(str(policy_id))
@@ -284,7 +284,7 @@ async def update_policy_fields(policy_id: UUID, body: dict, _=Depends(_require_s
 #
 #
 # @admin_policies_router.post("/{policy_id}/reject", response_model=ResponseModel)
-# async def reject_policy(policy_id: UUID, _=Depends(_require_superadmin)):
+# async def reject_policy(policy_id: UUID, _=Depends(require_permission("policies", "edit"))):
 #     pq = PolicyQuery()
 #     uq = UserQuery()
 #     policy = pq.get_by_id(str(policy_id))
@@ -327,7 +327,7 @@ async def update_policy_fields(policy_id: UUID, body: dict, _=Depends(_require_s
 
 
 @admin_policies_router.post("/{policy_id}/confirm-renewal", response_model=ResponseModel)
-async def confirm_renewal(policy_id: UUID, _=Depends(_require_superadmin)):
+async def confirm_renewal(policy_id: UUID, _=Depends(require_permission("policies", "edit"))):
     pq = PolicyQuery()
     ok = pq.confirm_renewal(str(policy_id))
     if not ok:
@@ -336,7 +336,7 @@ async def confirm_renewal(policy_id: UUID, _=Depends(_require_superadmin)):
 
 
 @admin_policies_router.post("/{policy_id}/dismiss-renewal", response_model=ResponseModel)
-async def dismiss_renewal(policy_id: UUID, _=Depends(_require_superadmin)):
+async def dismiss_renewal(policy_id: UUID, _=Depends(require_permission("policies", "edit"))):
     pq = PolicyQuery()
     ok = pq.dismiss_renewal(str(policy_id))
     if not ok:
@@ -345,7 +345,7 @@ async def dismiss_renewal(policy_id: UUID, _=Depends(_require_superadmin)):
 
 
 @admin_policies_router.get("/{policy_id}", response_model=ResponseModel)
-async def get_policy(policy_id: UUID, request: Request, _=Depends(_require_superadmin)):
+async def get_policy(policy_id: UUID, request: Request, _=Depends(require_permission("policies", "view"))):
     svc = PolicyService()
     uq = UserQuery()
     paq = PartnerQuery()

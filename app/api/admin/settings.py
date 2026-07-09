@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel
 from typing import Optional
 from ...schemas.base import ResponseModel
-from ..users import _require_superadmin
+from ..deps import require_permission
 from ...db.queries.system_setting_query import SystemSettingQuery
 
 admin_settings_router = APIRouter()
@@ -19,7 +19,7 @@ class SettingUpdate(BaseModel):
 
 
 @admin_settings_router.get("", response_model=ResponseModel)
-async def list_settings(_=Depends(_require_superadmin)):
+async def list_settings(_=Depends(require_permission("settings", "view"))):
     sq = SystemSettingQuery()
     rows = sq.list_all()
     existing = {r.key: r for r in rows}
@@ -37,7 +37,7 @@ async def list_settings(_=Depends(_require_superadmin)):
 
 
 @admin_settings_router.patch("/{key}", response_model=ResponseModel)
-async def update_setting(key: str, body: SettingUpdate, _=Depends(_require_superadmin)):
+async def update_setting(key: str, body: SettingUpdate, _=Depends(require_permission("settings", "edit"))):
     if key not in KNOWN_SETTINGS:
         from fastapi import HTTPException
         raise HTTPException(status_code=400, detail=f"Unknown setting key: {key}")

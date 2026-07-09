@@ -10,7 +10,7 @@ from ...db.session import session_scope
 from ...db.models.llm_usage import LLMUsage
 from ...storage import get_storage
 from ...agents import DocumentExtractorAgent, DocValidatorAgent, OutboundCallerAgent, MultilingualAgent
-from ..users import _require_superadmin
+from ..deps import require_permission
 
 admin_ai_router = APIRouter()
 
@@ -18,7 +18,7 @@ admin_ai_router = APIRouter()
 # ── Extract + Validate a policy PDF ──────────────────────────────────────────
 
 @admin_ai_router.post("/extract/{policy_id}", response_model=ResponseModel)
-async def extract_policy(policy_id: UUID, request: Request, _=Depends(_require_superadmin)):
+async def extract_policy(policy_id: UUID, request: Request, _=Depends(require_permission("ai", "edit"))):
     """
     Run AI extraction + validation on an uploaded policy PDF.
     Updates policy.extracted_fields, ai_confidence, and status.
@@ -102,7 +102,7 @@ class CallScriptRequest(BaseModel):
 
 
 @admin_ai_router.post("/call-script", response_model=ResponseModel)
-async def generate_call_script(body: CallScriptRequest, request: Request, _=Depends(_require_superadmin)):
+async def generate_call_script(body: CallScriptRequest, request: Request, _=Depends(require_permission("ai", "add"))):
     """Generate an outbound call script for a member."""
     uq = UserQuery()
     member = uq.get_user_by_id(body.member_id)
@@ -128,7 +128,7 @@ class TranslateRequest(BaseModel):
 
 
 @admin_ai_router.post("/translate", response_model=ResponseModel)
-async def translate_text(body: TranslateRequest, request: Request, _=Depends(_require_superadmin)):
+async def translate_text(body: TranslateRequest, request: Request, _=Depends(require_permission("ai", "add"))):
     """Translate text to English or Hindi."""
     result = MultilingualAgent().translate(body.text, body.target_language)
     return ResponseModel.ok(data=result.model_dump())
@@ -137,7 +137,7 @@ async def translate_text(body: TranslateRequest, request: Request, _=Depends(_re
 # ── LLM Billing Summary ───────────────────────────────────────────────────────
 
 @admin_ai_router.get("/billing", response_model=ResponseModel)
-async def get_billing_summary(request: Request, _=Depends(_require_superadmin)):
+async def get_billing_summary(request: Request, _=Depends(require_permission("ai", "view"))):
     """View total LLM usage and cost breakdown by agent."""
     with session_scope() as session:
         rows = session.query(LLMUsage).order_by(LLMUsage.created_at.desc()).limit(500).all()

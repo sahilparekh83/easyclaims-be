@@ -1,12 +1,19 @@
 from typing import Optional, List
 from ..models.roles import Role, UserRole
+from ...constants import RoleType
 from ..session import session_scope
 
 
 class RoleQuery:
-    def list_roles(self) -> List[Role]:
+    def list_roles(self, admin_only: bool = True) -> List[Role]:
+        """By default, only ADMIN-type roles — these are the ones that gate the admin
+        panel's permission grid. CUSTOMER/PARTNER roles are auto-managed housekeeping
+        tags with no permissions of their own and shouldn't show up in that UI."""
         with session_scope() as session:
-            roles = session.query(Role).filter(Role.is_active == True).all()
+            q = session.query(Role).filter(Role.is_active == True)
+            if admin_only:
+                q = q.filter(Role.role_type == RoleType.ADMIN)
+            roles = q.all()
             for r in roles:
                 session.expunge(r)
             return roles
@@ -88,3 +95,50 @@ class RoleQuery:
             existing = self.get_role_by_name(item["role_name"])
             if not existing:
                 self.create_role(item["role_name"], item["role_type"])
+
+    def update_role(self, role_id: str, role_name: Optional[str] = None,
+                    is_active: Optional[bool] = None) -> Optional[Role]:
+        with session_scope() as session:
+            role = session.query(Role).filter(Role.id == role_id).first()
+            if not role:
+                return None
+            if role_name is not None:
+                role.role_name = role_name
+            if is_active is not None:
+                role.is_active = is_active
+            session.flush()
+            session.expunge(role)
+            return role
+
+    def delete_role(self, role_id: str) -> bool:
+        from ..models.permission import RolePermission
+        with session_scope() as session:
+            role = session.query(Role).filter(Role.id == role_id).first()
+            if not role:
+                return False
+            session.query(RolePermission).filter(RolePermission.role_id == role_id).delete()
+            session.delete(role)
+            return True
+
+    def count_users_with_role(self, role_id: str) -> int:
+        with session_scope() as session:
+            return (
+                session.query(UserRole)
+                .filter(UserRole.role_id == role_id, UserRole.is_active == True)
+                .count()
+            )
+
+    def list_user_ids_with_role_name(self, role_name: str) -> List[str]:
+        """Active user ids holding an active role by name, ordered stably (by
+        user_roles.created_at) — the rotation order for round-robin assignment."""
+        with session_scope() as session:
+            role = session.query(Role).filter(Role.role_name == role_name, Role.is_active == True).first()
+            if not role:
+                return []
+            rows = (
+                session.query(UserRole)
+                .filter(UserRole.role_id == role.id, UserRole.is_active == True)
+                .order_by(UserRole.created_at)
+                .all()
+            )
+            return [str(r.user_id) for r in rows]
