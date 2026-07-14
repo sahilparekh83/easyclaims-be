@@ -4,7 +4,10 @@ __pycache__/
 dist/
 build/
 .env
+env.yaml
 *.logs
+*.log
+server.log.pos
 .venv/
 venv/
 .pytest_cache/

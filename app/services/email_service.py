@@ -146,7 +146,7 @@ class EmailService:
             "member_email": member_email,
             "policy_number": policy_number,
             "policy_type": policy_type,
-        }, partner_id=partner_id)
+        })
 
     def send_policy_uploaded_admin(self, to_email: str, member_name: str,
                                    member_email: str, partner_name: str,
