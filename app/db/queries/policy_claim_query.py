@@ -1,6 +1,7 @@
 import uuid as _uuid
 from datetime import datetime, timezone
-from typing import List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
+from sqlalchemy import func
 from ..models.policy_claim import PolicyClaim, PolicyClaimDocument, ClaimActivityLog
 from ..session import session_scope
 
@@ -33,6 +34,26 @@ class PolicyClaimQuery:
     def count_all(self) -> int:
         with session_scope() as session:
             return session.query(PolicyClaim).filter(PolicyClaim.is_deleted == False).count()
+
+    def count_by_agent_and_status(self, agent_ids: List[str]) -> Dict[str, Dict[str, int]]:
+        """Returns {agent_id: {status: count, ...}, ...} for the given agent ids in a
+        single grouped query — used for the claim-agents overview/workload page."""
+        if not agent_ids:
+            return {}
+        ids = [_uuid.UUID(str(a)) for a in agent_ids]
+        with session_scope() as session:
+            rows = (
+                session.query(
+                    PolicyClaim.assigned_agent_id, PolicyClaim.status, func.count(PolicyClaim.id)
+                )
+                .filter(PolicyClaim.assigned_agent_id.in_(ids), PolicyClaim.is_deleted == False)
+                .group_by(PolicyClaim.assigned_agent_id, PolicyClaim.status)
+                .all()
+            )
+        result: Dict[str, Dict[str, int]] = {str(a): {} for a in agent_ids}
+        for agent_id, status, count in rows:
+            result.setdefault(str(agent_id), {})[status] = count
+        return result
 
     def list_for_user(self, user_id: str) -> List[PolicyClaim]:
         with session_scope() as session:

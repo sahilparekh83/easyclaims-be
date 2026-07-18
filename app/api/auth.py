@@ -32,6 +32,25 @@ def _set_auth_cookies(response: Response, access_token: str, refresh_token: str)
                         max_age=settings.REFRESH_TOKEN_EXPIRE_SECONDS, **cookie_kwargs)
 
 
+def _check_login_allowed(user) -> None:
+    """Blocks login for deactivated accounts and members with no active
+    enrollment (all cancelled/expired). Members with zero enrollments (not
+    yet assigned a plan) are allowed through — that's a distinct, valid state."""
+    if not user.is_active:
+        raise HTTPException(
+            status_code=403,
+            detail="Your account has been deactivated. Please contact your partner or administrator.",
+        )
+    if user.user_type.value == "CUSTOMER":
+        from ..db.queries.member_query import MemberQuery
+        enrollments = MemberQuery().list_enrollments(str(user.id))
+        if enrollments and not any(e.status == "Active" for e in enrollments):
+            raise HTTPException(
+                status_code=403,
+                detail="Your membership has been cancelled or has expired. Please contact your partner to renew.",
+            )
+
+
 @auth_router.post("/send-otp", response_model=ResponseModel)
 async def send_otp(body: SendOTPRequest):
     user_service = UserService()
@@ -41,6 +60,7 @@ async def send_otp(body: SendOTPRequest):
     user = user_service.get_user_by_email(str(body.email))
     if not user:
         raise HTTPException(status_code=404, detail="No account found with this email")
+    _check_login_allowed(user)
 
     settings = get_settings()
     raw_otp = otp_service.create_otp_for_user(str(user.id), str(body.email))
@@ -66,6 +86,7 @@ async def verify_otp(body: VerifyOTPRequest, response: Response):
     user = user_service.get_user_by_email(str(body.email))
     if not user:
         raise HTTPException(status_code=401, detail="Invalid credentials")
+    _check_login_allowed(user)
 
     otp_log = otp_service.validate_otp(str(body.email), body.otp)
     if not otp_log:
@@ -141,6 +162,7 @@ async def refresh_token(request: Request, response: Response):
     user = user_query.get_user_by_id(user_id)
     if not user:
         raise HTTPException(status_code=401, detail="User not found")
+    _check_login_allowed(user)
 
     roles = RoleQuery().get_user_roles(str(user.id))
     permissions = PermissionQuery().get_keys_for_roles(roles)

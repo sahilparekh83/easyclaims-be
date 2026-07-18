@@ -78,3 +78,16 @@ class PartnerTypeQuery:
             session.flush()
             session.expunge(row)
             return row
+
+    def count_linked_partners(self, partner_type_id: str) -> int:
+        from ..models.partner import Partner
+        with session_scope() as session:
+            return session.query(Partner).filter(Partner.partner_type_id == partner_type_id).count()
+
+    def delete(self, partner_type_id: str) -> bool:
+        with session_scope() as session:
+            row = session.query(PartnerType).filter(PartnerType.id == partner_type_id).first()
+            if not row:
+                return False
+            session.delete(row)
+            return True

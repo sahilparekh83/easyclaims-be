@@ -130,6 +130,26 @@ async def list_claim_agents(_=Depends(require_permission("claims", "view"))):
     return ResponseModel.ok(data=agents)
 
 
+@admin_claims_router.get("/agents/overview", response_model=ResponseModel)
+async def list_claim_agents_overview(
+    skip: int = 0, limit: int = 50, active_only: bool = False,
+    _=Depends(require_permission("claims", "view")),
+):
+    """CLAIMS_AGENT users (active + deactivated accounts) with total claims handled
+    and a per-status breakdown, paginated — for the Claim Agents admin page."""
+    total, agents = PolicyClaimService().get_agents_overview(skip=skip, limit=limit, active_only=active_only)
+    return ResponseModel.ok(data={"data": agents, "total": total, "skip": skip, "limit": limit})
+
+
+@admin_claims_router.get("/agents/overview/{agent_id}", response_model=ResponseModel)
+async def get_claim_agent_overview(agent_id: UUID, _=Depends(require_permission("claims", "view"))):
+    """Single agent's workload summary — for the Claim Agents detail page header."""
+    agent = PolicyClaimService().get_agent_overview(str(agent_id))
+    if not agent:
+        raise HTTPException(status_code=404, detail="Claim agent not found")
+    return ResponseModel.ok(data=agent)
+
+
 @admin_claims_router.get("/{claim_id}", response_model=ResponseModel)
 async def get_claim(claim_id: UUID, request: Request, _=Depends(require_permission("claims", "view"))):
     payload = getattr(request.state, "user_payload", {})

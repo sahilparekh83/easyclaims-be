@@ -98,6 +98,9 @@ async def list_partners(
 
 @admin_partners_router.post("", response_model=ResponseModel, status_code=201)
 async def create_partner(body: PartnerCreate, request: Request, _=Depends(require_permission("partners", "add"))):
+    if not body.plan_ids:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=422, detail="At least one plan must be selected for this partner")
     p = PartnerService().create(body)
     if body.plan_ids:
         from ...services.plan_service import PlanService

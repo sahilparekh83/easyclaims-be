@@ -74,6 +74,19 @@ class UserQuery:
                 session.expunge(u)
             return users
 
+    def get_users_by_ids(self, user_ids: list) -> list:
+        if not user_ids:
+            return []
+        with session_scope() as session:
+            users = (
+                session.query(User)
+                .filter(User.id.in_([_uuid.UUID(str(u)) for u in user_ids]), User.is_deleted == False)
+                .all()
+            )
+            for u in users:
+                session.expunge(u)
+            return users
+
     def create_user(self, email: str, name: str, user_type: str, mobile_no: str = None) -> User:
         with session_scope() as session:
             user = User(email=email.lower(), name=name, user_type=user_type, mobile_no=mobile_no)

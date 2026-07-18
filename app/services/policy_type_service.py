@@ -38,8 +38,24 @@ class PolicyTypeService:
         self.get(policy_type_id)
         return self.query.toggle_active(policy_type_id, is_active)
 
+    def linked_count(self, policy_type_id: str) -> int:
+        return self.query.count_linked_policies(policy_type_id)
+
+    def delete(self, policy_type_id: str) -> None:
+        self.get(policy_type_id)
+        count = self.linked_count(policy_type_id)
+        if count > 0:
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    f"Cannot delete: {count} polic{'y is' if count == 1 else 'ies are'} "
+                    "linked to this policy type. Deactivate it instead."
+                ),
+            )
+        self.query.delete(policy_type_id)
+
     @staticmethod
-    def to_dict(pt: PolicyType) -> dict:
+    def to_dict(pt: PolicyType, linked_count: int = None) -> dict:
         return {
             "id": str(pt.id),
             "name": pt.name,
@@ -47,4 +63,6 @@ class PolicyTypeService:
             "description": pt.description,
             "is_active": pt.is_active,
             "created_at": pt.created_at.isoformat() if pt.created_at else None,
+            "linked_count": linked_count,
+            "can_delete": (linked_count == 0) if linked_count is not None else None,
         }
