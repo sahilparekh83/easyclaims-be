@@ -769,99 +769,6 @@ async def admin_add_member_to_partner(partner_id: UUID, request: Request, _=Depe
     })
 
 
-_MEMBER_COL_MAP = {
-    "email": "email", "email id": "email",
-    "name": "name", "full name": "name",
-    "mobile": "mobile_no", "mobile number": "mobile_no", "mobile no": "mobile_no",
-    "gender": "gender",
-    "address": "address_line", "address line": "address_line",
-    "city": "address_city",
-    "state": "address_state",
-    "pin": "address_pin", "pin code": "address_pin", "pincode": "address_pin",
-    "sale date": "sale_date",
-    "sales channel": "sales_channel",
-    "branch code": "branch_code",
-    "salesperson": "salesperson_name", "salesperson name": "salesperson_name",
-    "employee code": "employee_code",
-    "data 1": "data1", "data1": "data1",
-    "data 2": "data2", "data2": "data2",
-    "data 3": "data3", "data3": "data3",
-    "plan": "plan_name", "plan name": "plan_name",
-    "plan code": "plan_code", "plancode": "plan_code",
-}
-
-_MEMBER_MANDATORY = {"email", "name", "mobile_no", "plan_code"}
-
-
-def _resolve_plan_for_row(partner_id: str, plan_code: Optional[str]) -> tuple:
-    """Resolve the plan to enroll this row into via its mandatory 'Plan Code' column.
-    Returns (plan_id, error_message)."""
-    from ...db.queries.plan_query import PlanQuery
-    from ...db.models.partner import PartnerPlan
-    from ...db.session import session_scope
-
-    if not plan_code:
-        return None, "Plan Code is required"
-    plan = PlanQuery().get_by_code(plan_code)
-    if not plan or plan.status != "Active":
-        return None, f"Plan Code '{plan_code}' not found or not active"
-    if plan.plan_type == "partner":
-        with session_scope() as s:
-            linked = s.query(PartnerPlan).filter(
-                PartnerPlan.partner_id == partner_id, PartnerPlan.plan_id == plan.id,
-            ).first()
-        if not linked:
-            return None, f"Plan Code '{plan_code}' is not assigned to this partner"
-    return str(plan.id), None
-_MEMBER_MOB_RE = re.compile(r"^\+?[\d\s\-()]{7,15}$")
-_MEMBER_PIN_RE = re.compile(r"^\d{6}$")
-
-
-def _validate_member_row(rd: dict) -> list:
-    errors = []
-    for f in _MEMBER_MANDATORY:
-        if not rd.get(f):
-            errors.append(f"{f.replace('_', ' ').title()} is required")
-    mob = rd.get("mobile_no", "")
-    if mob and not _MEMBER_MOB_RE.match(mob):
-        errors.append("Invalid Mobile Number format")
-    pin = rd.get("address_pin", "")
-    if pin and not _MEMBER_PIN_RE.match(str(pin)):
-        errors.append("Invalid PIN Code — must be 6 digits")
-    gender = rd.get("gender", "")
-    if gender and gender not in ("Male", "Female", "Other"):
-        errors.append("Gender must be Male, Female, or Other")
-    return errors
-
-
-def _parse_member_excel(contents: bytes):
-    wb = openpyxl.load_workbook(filename=io.BytesIO(contents), read_only=True, data_only=True)
-    ws = wb.active
-    rows = list(ws.iter_rows(values_only=True))
-    wb.close()
-    if not rows:
-        raise HTTPException(status_code=422, detail="Excel file is empty")
-    header = [str(c).strip().lower() if c else "" for c in rows[0]]
-    col_idx = {_MEMBER_COL_MAP[h]: i for i, h in enumerate(header) if h in _MEMBER_COL_MAP}
-    missing = _MEMBER_MANDATORY - set(col_idx.keys())
-    if missing:
-        raise HTTPException(
-            status_code=422,
-            detail=f"Missing mandatory columns: {', '.join(sorted(missing))}"
-        )
-    return rows[0], rows[1:], col_idx
-
-
-def _member_row_to_dict(row, col_idx: dict) -> dict:
-    def cell(field):
-        idx = col_idx.get(field)
-        if idx is None:
-            return None
-        v = row[idx] if idx < len(row) else None
-        return str(v).strip() if v is not None else None
-    return {field: cell(field) for field in list(_MEMBER_COL_MAP.values())}
-
-
 @admin_partners_router.post("/{partner_id}/members/bulk-upload", response_model=ResponseModel)
 async def admin_bulk_upload_members_to_partner(
     partner_id: UUID,
@@ -869,127 +776,46 @@ async def admin_bulk_upload_members_to_partner(
     request: Request = None,
     _=Depends(require_permission("partners", "add")),
 ):
-    """Admin bulk uploads members to a specific partner from Excel."""
-    from ...services.member_service import MemberService
-    from ...schemas.member import MemberCreate
+    """Admin bulk uploads members to a specific partner from Excel. Uses the
+    same shared logic as the general /admin/members/bulk-upload endpoint —
+    this partner is passed as the fallback, so a Partner Code column (if
+    present) can still override it per row."""
+    from ...services.member_bulk_upload_service import process_member_bulk_upload
+
+    partner = PartnerQuery().get_by_id(str(partner_id))
+    if not partner:
+        raise HTTPException(status_code=404, detail="Partner not found")
+    if partner.status != "Active":
+        raise HTTPException(status_code=422, detail=f"This partner is {partner.status} — bulk upload is disabled")
 
     contents = await file.read()
-    try:
-        header_row, data_rows, col_idx = _parse_member_excel(contents)
-    except HTTPException:
-        raise
-    except Exception:
-        raise HTTPException(status_code=422, detail="Invalid Excel file — must be .xlsx format")
+    results = process_member_bulk_upload(contents, fallback_partner_id=str(partner_id))
+    created_by_partner = results.pop("created_by_partner")
 
-    svc = MemberService()
-    results = {"total_rows": len(data_rows), "created": [], "skipped": [], "errors": []}
-
-    for row_num, row in enumerate(data_rows, start=2):
-        rd = _member_row_to_dict(row, col_idx)
-        row_errors = _validate_member_row(rd)
-        if row_errors:
-            results["errors"].append({"row": row_num, "email": rd.get("email"), "errors": row_errors})
-            continue
-        email = rd["email"]
-        resolved_plan_id, plan_error = _resolve_plan_for_row(str(partner_id), rd.get("plan_code"))
-        if plan_error:
-            results["errors"].append({"row": row_num, "email": email, "errors": [plan_error]})
-            continue
-        try:
-            body = MemberCreate(
-                email=email,
-                name=rd.get("name") or email.split("@")[0],
-                mobile_no=rd.get("mobile_no") or "0000000000",
-                gender=rd.get("gender") or None,
-                address_line=rd.get("address_line") or None,
-                address_city=rd.get("address_city") or None,
-                address_state=rd.get("address_state") or None,
-                address_pin=rd.get("address_pin") or None,
-                sale_date=rd.get("sale_date") or None,
-                sales_channel=rd.get("sales_channel") or None,
-                branch_code=rd.get("branch_code") or None,
-                salesperson_name=rd.get("salesperson_name") or None,
-                employee_code=rd.get("employee_code") or None,
-                data1=rd.get("data1") or None,
-                data2=rd.get("data2") or None,
-                data3=rd.get("data3") or None,
-                partner_id=str(partner_id),
-                plan_id=resolved_plan_id,
-            )
-            svc.create_member(body)
-            results["created"].append({"row": row_num, "email": email})
-        except HTTPException as e:
-            results["skipped"].append({"row": row_num, "email": email, "reason": e.detail})
-        except Exception as exc:
-            results["errors"].append({"row": row_num, "email": email, "errors": [str(exc)]})
-
-    if results["created"]:
+    if created_by_partner:
         from ...services.notification_helper import notify_partner
-        notify_partner(
-            partner_id=str(partner_id),
-            type="new_member",
-            title=f"{len(results['created'])} new member(s) added via bulk upload",
-            body=f"{len(results['created'])} member(s) were enrolled under your account.",
-            ref_id=str(partner_id),
-            ref_type="partner",
-        )
+        for pid, count in created_by_partner.items():
+            notify_partner(
+                partner_id=pid,
+                type="new_member",
+                title=f"{count} new member(s) added via bulk upload",
+                body=f"{count} member(s) were enrolled under your account.",
+                ref_id=pid,
+                ref_type="partner",
+            )
     return ResponseModel.ok(data=results)
 
 
 @admin_partners_router.get("/{partner_id}/members/bulk-upload/sample")
 async def admin_member_bulk_sample(partner_id: UUID, _=Depends(require_permission("partners", "view"))):
-    """Return a sample Excel for member bulk upload."""
-    from openpyxl.styles import Alignment
-    from ...db.queries.plan_query import PlanQuery
+    """Return a sample Excel for member bulk upload, scoped to this one partner."""
+    from ...services.member_bulk_upload_service import generate_sample_workbook
 
-    available_plans = PlanQuery().list_for_partner(str(partner_id), active_only=True)
-    sample_plan_code = available_plans[0].plan_code if available_plans else "PLN001"
+    partner = PartnerQuery().get_by_id(str(partner_id))
+    if not partner:
+        raise HTTPException(status_code=404, detail="Partner not found")
 
-    HEADERS = [
-        "Email ID", "Name", "Mobile Number", "Gender", "Plan Code",
-        "Address", "City", "State", "PIN Code",
-        "Sale Date", "Sales Channel", "Branch Code", "Salesperson Name", "Employee Code",
-        "Data 1", "Data 2", "Data 3",
-    ]
-    SAMPLE = [
-        "john.doe@example.com", "John Doe", "9876543210", "Male", sample_plan_code,
-        "123 MG Road", "Mumbai", "Maharashtra", "400001",
-        "2024-01-15", "Direct", "BRN001", "Jane Smith", "EMP123",
-        "", "", "",
-    ]
-
-    wb = openpyxl.Workbook()
-    ws = wb.active
-    ws.title = "Members"
-    hdr_fill = PatternFill(start_color="0A2257", end_color="0A2257", fill_type="solid")
-    for col_num, h in enumerate(HEADERS, start=1):
-        cell = ws.cell(row=1, column=col_num, value=h)
-        cell.font = Font(bold=True, color="FFFFFF")
-        cell.fill = hdr_fill
-        cell.alignment = Alignment(horizontal="center")
-        ws.column_dimensions[cell.column_letter].width = max(len(h) + 4, 18)
-    for col_num, v in enumerate(SAMPLE, start=1):
-        ws.cell(row=2, column=col_num, value=v)
-
-    ws2 = wb.create_sheet("Partner Plans")
-    plan_headers = ["Plan Name", "Plan Code", "Status"]
-    for col_num, h in enumerate(plan_headers, start=1):
-        cell = ws2.cell(row=1, column=col_num, value=h)
-        cell.font = Font(bold=True, color="FFFFFF")
-        cell.fill = hdr_fill
-        cell.alignment = Alignment(horizontal="center")
-        ws2.column_dimensions[cell.column_letter].width = max(len(h) + 4, 18)
-    if available_plans:
-        for row_num, plan in enumerate(available_plans, start=2):
-            ws2.cell(row=row_num, column=1, value=plan.name)
-            ws2.cell(row=row_num, column=2, value=plan.plan_code)
-            ws2.cell(row=row_num, column=3, value=plan.status)
-    else:
-        ws2.cell(row=2, column=1, value="No active plans are assigned to this partner yet.")
-
-    buf = io.BytesIO()
-    wb.save(buf)
-    buf.seek(0)
+    buf = generate_sample_workbook([partner])
     return StreamingResponse(
         buf,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -1004,9 +830,11 @@ async def admin_member_bulk_report(
     _=Depends(require_permission("partners", "view")),
 ):
     """Dry-run member upload and return annotated Excel with error rows highlighted red."""
+    from ...services.member_bulk_upload_service import parse_member_excel, member_row_to_dict, validate_member_row
+
     contents = await file.read()
     try:
-        header_row, data_rows, col_idx = _parse_member_excel(contents)
+        header_row, data_rows, col_idx = parse_member_excel(contents, require_partner_code=False)
     except HTTPException:
         raise
     except Exception:
@@ -1033,8 +861,8 @@ async def admin_member_bulk_report(
     error_col  = len(header_list)
 
     for row_num, row in enumerate(data_rows, start=2):
-        rd = _member_row_to_dict(row, col_idx)
-        row_errors = _validate_member_row(rd)
+        rd = member_row_to_dict(row, col_idx)
+        row_errors = validate_member_row(rd)
         fill   = RED_FILL   if row_errors else GREEN_FILL
         font   = RED_FONT   if row_errors else GREEN_FONT
         status = "Error ✗"  if row_errors else "OK ✓"
