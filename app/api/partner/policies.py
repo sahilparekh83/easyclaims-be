@@ -22,6 +22,7 @@ def _policy_dict(p, policy_type_name: str = None) -> dict:
         "policy_type": policy_type_name,
         "insurer": p.insurer,
         "sum_insured": p.sum_insured,
+        "policy_holder_name": p.policy_holder_name,
         "start_date": str(p.start_date) if p.start_date else None,
         "end_date": str(p.end_date) if p.end_date else None,
         "status": p.status,

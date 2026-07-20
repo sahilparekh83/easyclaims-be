@@ -11,7 +11,8 @@ from ..db.queries.system_setting_query import SystemSettingQuery
 from ..schemas.policy_claim import ClaimCreate, ClaimStatusUpdate
 from ..storage import get_storage
 from .email_service import EmailService
-from .whatsapp_service import WhatsAppService
+from .whatsapp_service import WhatsAppService  # noqa: F401 — kept dormant, see MetaWhatsAppService below
+from .meta_whatsapp_service import MetaWhatsAppService
 from .notification_helper import notify_all_admins
 from ..db.queries.activity_query import NotificationQuery
 
@@ -76,7 +77,8 @@ class PolicyClaimService:
             logger.exception("Failed to email claim agent %s", agent.email)
         if agent.mobile_no:
             try:
-                WhatsAppService().send_from_db_template(agent.mobile_no, "wa_claim_assigned_agent", context)
+                # WhatsAppService().send_from_db_template(agent.mobile_no, "wa_claim_assigned_agent", context)  # Twilio — replaced by Meta template send below
+                MetaWhatsAppService().send_template_from_db(agent.mobile_no, "wa_claim_assigned_agent", context)
             except Exception:
                 logger.exception("Failed to WhatsApp claim agent %s", agent.mobile_no)
 
@@ -107,7 +109,8 @@ class PolicyClaimService:
                     logger.exception("Failed to email admin %s about claim %s", email, claim.claim_number)
                 if mobile:
                     try:
-                        WhatsAppService().send_from_db_template(mobile, "wa_claim_submitted_admin", context)
+                        # WhatsAppService().send_from_db_template(mobile, "wa_claim_submitted_admin", context)  # Twilio — replaced by Meta template send below
+                        MetaWhatsAppService().send_template_from_db(mobile, "wa_claim_submitted_admin", context)
                     except Exception:
                         logger.exception("Failed to WhatsApp admin %s about claim %s", mobile, claim.claim_number)
         except Exception:
@@ -133,7 +136,13 @@ class PolicyClaimService:
             logger.exception("Failed to email member %s about claim status", member.email)
         if member.mobile_no:
             try:
-                WhatsAppService().send_from_db_template(member.mobile_no, "wa_claim_status_update_member", context)
+                # WhatsAppService().send_from_db_template(member.mobile_no, "wa_claim_status_update_member", context)  # Twilio — replaced by Meta template send below
+                # Meta rejects blank template parameters, so fall back to non-empty text
+                # for the WhatsApp send only (email/in-app can stay blank when no remark).
+                MetaWhatsAppService().send_template_from_db(
+                    member.mobile_no, "wa_claim_status_update_member",
+                    {**context, "remark": remark or "No additional remarks."},
+                )
             except Exception:
                 logger.exception("Failed to WhatsApp member %s about claim status", member.mobile_no)
 

@@ -9,6 +9,10 @@ Required fields:
 - start_date (policy start date, YYYY-MM-DD format)
 - end_date (policy end date / expiry date, YYYY-MM-DD format)
 - confidence (0.0 to 1.0 based on how clearly the data was found)
+- policy_category: Assign the SINGLE closest matching category from this exact
+  allowed list — never invent a new category and never leave it blank, even
+  under low confidence pick the closest match: {allowed_categories}.
+  Return the category's code value exactly as given in the list.
 
 Also extract all family/dependent members covered under this policy into "family_members" as a list.
 Look for: insured members table, family floater member list, nominee details, covered persons section,
@@ -25,7 +29,7 @@ This string should contain a flat key-value object with everything relevant:
 premium, coverage type, room rent, waiting period, exclusions, co-payment, network hospitals,
 NCB, IDV, claim process, helpline, riders, sub-limits, maternity, daycare —
 whatever applies to this policy type. Use snake_case key names. Omit null values.
-Example: "{\"premium\": \"Rs. 12,500/year\", \"room_rent\": \"Single Private AC Room\"}"
+Example: "{{\"premium\": \"Rs. 12,500/year\", \"room_rent\": \"Single Private AC Room\"}}"
 
 Return only JSON, no explanation.
 """

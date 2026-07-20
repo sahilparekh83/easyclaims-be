@@ -96,7 +96,8 @@ class PartnerService:
     def _send_welcome_notifications(self, user, partner) -> None:
         from ..configs.common import get_settings
         from .email_service import EmailService
-        from .whatsapp_service import WhatsAppService
+        from .whatsapp_service import WhatsAppService  # noqa: F401 — kept dormant
+        from .meta_whatsapp_service import MetaWhatsAppService
         settings = get_settings()
         portal_url = f"{settings.FRONTEND_URL}/login"
 
@@ -111,14 +112,22 @@ class PartnerService:
 
         if user.mobile_no:
             try:
-                message = (
-                    f"Welcome to EasyClaims, {partner.name}! 🎉\n\n"
-                    f"Your partner account has been created.\n\n"
-                    f"Login at: {portal_url}\n"
-                    f"Email: {user.email}\n\n"
-                    f"For support, reply to this message."
+                # message = (  # Twilio free-form text — replaced by Meta template send below
+                #     f"Welcome to EasyClaims, {partner.name}! 🎉\n\n"
+                #     f"Your partner account has been created.\n\n"
+                #     f"Login at: {portal_url}\n"
+                #     f"Email: {user.email}\n\n"
+                #     f"For support, reply to this message."
+                # )
+                # WhatsAppService().send_message(user.mobile_no, message)
+                MetaWhatsAppService().send_template_from_db(
+                    user.mobile_no, "wa_partner_welcome",
+                    {
+                        "partner_name": partner.name,
+                        "portal_url": portal_url,
+                        "email": str(user.email),
+                    },
                 )
-                WhatsAppService().send_message(user.mobile_no, message)
             except Exception:
                 logger.exception("Failed to send welcome WhatsApp to partner %s", user.mobile_no)
 

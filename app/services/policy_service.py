@@ -11,6 +11,7 @@ from ..db.models.policy import Policy
 from ..schemas.policy import PolicyCreate
 from ..storage import get_storage
 from .email_service import EmailService
+from .audit_service import AuditService
 
 logger = logging.getLogger(__name__)
 
@@ -30,9 +31,11 @@ def run_ai_extraction(policy_id: str, storage_key: str, member_name: str) -> Non
             f.write(pdf_bytes)
             tmp_path = f.name
 
-        extracted = DocumentExtractorAgent().extract(tmp_path, policy_id=policy_id)
+        active_types = PolicyTypeQuery().list_all(active_only=True)
+        extracted = DocumentExtractorAgent().extract(tmp_path, policy_id=policy_id, active_types=active_types)
         policy = pq.get_by_id(policy_id)
         member = UQ().get_user_by_id(str(policy.user_id)) if policy else None
+        resolved_pt = _resolve_policy_category(extracted.policy_category, active_types)
 
         validation = DocValidatorAgent().validate(
             extracted=extracted.model_dump(),
@@ -61,16 +64,46 @@ def run_ai_extraction(policy_id: str, storage_key: str, member_name: str) -> Non
         else:
             final_status = "active"
 
-        pq.update_ai_result(policy_id, fields, confidence_pct, final_status)
+        # Preserve the previous rejection reason (if any) in the audit trail before
+        # update_ai_result() overwrites extracted_fields wholesale on re-extraction.
+        old_reason = (policy.extracted_fields or {}).get("validation_reason") if policy else None
+        pre_update_status = policy.status if policy else None
+
+        pq.update_ai_result(
+            policy_id, fields, confidence_pct, final_status,
+            policy_type_id=str(resolved_pt.id) if resolved_pt else None,
+            policy_holder_name=extracted.insured_name,
+        )
         logger.info("AI extraction complete for policy %s — status: %s", policy_id, final_status)
+
+        try:
+            AuditService().log(
+                actor_id=None, actor_type="system",
+                action="policy_validation_result",
+                entity_type="policy", entity_id=str(policy_id),
+                old_value={"validation_reason": old_reason} if old_reason else None,
+                new_value={"status": final_status, "validation_reason": validation.reason, "confidence": confidence_pct},
+            )
+        except Exception:
+            logger.warning("Failed to write audit log for policy %s extraction result", policy_id)
 
         # Notify member if document rejected
         if final_status == "rejected" and member:
             pol_no = policy.policy_number or policy_id
             try:
-                from .whatsapp_service import WhatsAppService
+                from .whatsapp_service import WhatsAppService  # noqa: F401 — kept dormant
+                from .meta_whatsapp_service import MetaWhatsAppService
                 if member.mobile_no:
-                    WhatsAppService().send_from_db_template(
+                    # WhatsAppService().send_from_db_template(  # Twilio — replaced by Meta template send below
+                    #     member.mobile_no, "wa_policy_rejected",
+                    #     {
+                    #         "member_name": member.name or "there",
+                    #         "policy_number": pol_no,
+                    #         "reason": validation.reason or "Document does not appear to be a valid insurance policy.",
+                    #     },
+                    #     partner_id=str(policy.partner_id),
+                    # )
+                    MetaWhatsAppService().send_template_from_db(
                         member.mobile_no, "wa_policy_rejected",
                         {
                             "member_name": member.name or "there",
@@ -107,6 +140,72 @@ def run_ai_extraction(policy_id: str, storage_key: str, member_name: str) -> Non
                 )
             except Exception:
                 logger.warning("Failed to send rejection admin/partner notification for policy %s", policy_id)
+            AuditService().log(
+                actor_id=None, actor_type="system",
+                action="policy_rejected",
+                entity_type="policy", entity_id=str(policy_id),
+                new_value={"reason": validation.reason},
+            )
+
+        # Notify member if policy approved (auto-activated) — guarded so a future
+        # re-extraction/retry on an already-active policy doesn't re-notify.
+        elif final_status == "active" and member and pre_update_status != "active":
+            pol_no = policy.policy_number or policy_id
+            policy_type_label = resolved_pt.name if resolved_pt else "Insurance"
+            try:
+                from .whatsapp_service import WhatsAppService  # noqa: F401 — kept dormant
+                from .meta_whatsapp_service import MetaWhatsAppService
+                if member.mobile_no:
+                    # WhatsAppService().send_from_db_template(  # Twilio — replaced by Meta template send below
+                    #     member.mobile_no, "wa_policy_approved",
+                    #     {
+                    #         "member_name": member.name or "there",
+                    #         "policy_number": pol_no,
+                    #         "policy_type": policy_type_label,
+                    #     },
+                    #     partner_id=str(policy.partner_id),
+                    # )
+                    MetaWhatsAppService().send_template_from_db(
+                        member.mobile_no, "wa_policy_approved",
+                        {
+                            "member_name": member.name or "there",
+                            "policy_number": pol_no,
+                            "policy_type": policy_type_label,
+                        },
+                        partner_id=str(policy.partner_id),
+                    )
+            except Exception:
+                logger.warning("Failed to send approval WhatsApp for policy %s", policy_id)
+            try:
+                EmailService().send_policy_active(
+                    member.email, member.name or member.email, pol_no,
+                    partner_id=str(policy.partner_id),
+                )
+            except Exception:
+                logger.warning("Failed to send approval email for policy %s", policy_id)
+            try:
+                from .notification_helper import notify_all_admins, notify_partner
+                member_label = member.name or member.email
+                notify_all_admins(
+                    type="policy_approved",
+                    title=f"Policy Approved — {pol_no}",
+                    body=f"{member_label}'s {policy_type_label} policy {pol_no} was auto-approved.",
+                    ref_id=str(policy_id), ref_type="policy",
+                )
+                notify_partner(
+                    partner_id=str(policy.partner_id),
+                    type="policy_approved",
+                    title=f"Policy Approved — {pol_no}",
+                    body=f"{member_label}'s {policy_type_label} policy {pol_no} was auto-approved.",
+                    ref_id=str(policy_id), ref_type="policy",
+                )
+            except Exception:
+                logger.warning("Failed to send approval admin/partner notification for policy %s", policy_id)
+            AuditService().log(
+                actor_id=None, actor_type="system",
+                action="policy_approved",
+                entity_type="policy", entity_id=str(policy_id),
+            )
 
         # Build family member list — prefer structured field, fallback to nominee in additional_info
         family_members = list(extracted.family_members or [])
@@ -168,6 +267,35 @@ def _dummy_extracted_fields(policy_number: str, policy_type_name: str,
         "Maternity Benefit": "Not detected",
         "AI Extraction Status": "Dummy (AI not configured)",
     }
+
+
+def _resolve_policy_category(raw: Optional[str], active_types: list):
+    """Resolve the AI's free-text category guess to a real PolicyType — never returns None.
+
+    Exact match on code/name first, then fuzzy match, then falls back to the
+    seeded 'other_insurance' type (or the first active type if even that is
+    missing) so a policy is never left without a category.
+    """
+    import difflib
+
+    fallback = next((t for t in active_types if t.code == "other_insurance"), None) \
+        or (active_types[0] if active_types else None)
+
+    if not raw or not active_types:
+        return fallback
+
+    raw_norm = raw.strip().lower()
+    for t in active_types:
+        if raw_norm == t.code.lower() or raw_norm == t.name.lower():
+            return t
+
+    labels = [f"{t.name} ({t.code})" for t in active_types]
+    matches = difflib.get_close_matches(raw, labels, n=1, cutoff=0.4)
+    if matches:
+        idx = labels.index(matches[0])
+        return active_types[idx]
+
+    return fallback
 
 
 def _normalize_relation(relation: str) -> str:
@@ -267,12 +395,41 @@ def _detect_and_link_renewal(policy, extracted, pq) -> None:
         if confidence is None:
             return
 
+        if policy.previous_policy_id and str(policy.previous_policy_id) == str(candidate.id):
+            return  # already linked to this candidate — avoid re-notifying on a future retry
+
         mark_renewed = confidence == "high"
         pq.link_renewal(str(policy.id), str(candidate.id), confidence, mark_renewed)
         logger.info(
             "Renewal detected for policy %s — previous: %s, confidence: %s",
             policy.id, candidate.id, confidence,
         )
+
+        AuditService().log(
+            actor_id=None, actor_type="system",
+            action="policy_renewal_detected",
+            entity_type="policy", entity_id=str(policy.id),
+            new_value={"previous_policy_id": str(candidate.id), "confidence": confidence},
+        )
+        try:
+            from ..db.queries.activity_query import NotificationQuery
+            from .notification_helper import notify_partner
+            NotificationQuery().create(
+                recipient_user_id=str(policy.user_id),
+                type="policy_renewal_linked",
+                title="New Policy Linked",
+                body=f"Your new policy {policy.policy_number or policy.id} was linked as a renewal of a previous policy.",
+                ref_id=str(policy.id), ref_type="policy",
+            )
+            notify_partner(
+                partner_id=str(policy.partner_id),
+                type="policy_renewal_linked",
+                title="New Policy Linked",
+                body=f"Policy {policy.policy_number or policy.id} was linked as a renewal of a previous policy.",
+                ref_id=str(policy.id), ref_type="policy",
+            )
+        except Exception:
+            logger.warning("Failed to send renewal-linked notification for policy %s", policy.id)
     except Exception as exc:
         logger.warning("Renewal detection failed for policy %s: %s", policy.id, exc)
 
@@ -319,11 +476,23 @@ class PolicyService:
         return self.pt_query.get_by_id(policy_type_id)
 
     async def upload_policy(self, user_id: str, partner_id: str,
-                            data: PolicyCreate, file: UploadFile) -> Policy:
-        # Validate policy type exists and is active
-        pt = self.pt_query.get_by_id(str(data.policy_type_id))
-        if not pt or not pt.is_active:
-            raise HTTPException(status_code=422, detail="Invalid or inactive policy type")
+                            data: PolicyCreate, file: UploadFile,
+                            actor_id: str = None, actor_type: str = "member") -> Policy:
+        # Category is auto-detected by AI post-upload — if a type was explicitly
+        # passed (legacy/manual caller), validate it; otherwise fall back to the
+        # seeded "Other Insurance" type so policy_type_id (NOT NULL) is always
+        # satisfiable. run_ai_extraction() re-categorizes once extraction completes.
+        if data.policy_type_id:
+            pt = self.pt_query.get_by_id(str(data.policy_type_id))
+            if not pt or not pt.is_active:
+                raise HTTPException(status_code=422, detail="Invalid or inactive policy type")
+        else:
+            pt = self.pt_query.get_by_code("other_insurance")
+            if not pt or not pt.is_active:
+                active_types = self.pt_query.list_all(active_only=True)
+                if not active_types:
+                    raise HTTPException(status_code=500, detail="No active policy types configured")
+                pt = active_types[0]
 
         # Validate file
         if file.content_type not in ("application/pdf", "application/octet-stream"):
@@ -367,7 +536,7 @@ class PolicyService:
             policy_id=policy_id,
             user_id=user_id,
             partner_id=partner_id,
-            policy_type_id=str(data.policy_type_id),
+            policy_type_id=str(pt.id),
             policy_number=_gen_policy_number(),
             insurer=data.insurer,
             sum_insured=data.sum_insured,
@@ -391,6 +560,13 @@ class PolicyService:
             policy.extracted_fields = dummy_fields
         except Exception:
             logger.warning("Failed to set dummy extracted_fields for policy %s", policy.id)
+
+        AuditService().log(
+            actor_id=actor_id or user_id, actor_type=actor_type,
+            action="policy_uploaded",
+            entity_type="policy", entity_id=str(policy.id),
+            new_value={"policy_number": policy.policy_number, "policy_type": pt.name if pt else None},
+        )
 
         self._send_upload_notifications(policy, user_id, partner_id, pt)
         return policy
@@ -422,8 +598,17 @@ class PolicyService:
                 )
                 if member.mobile_no:
                     try:
-                        from .whatsapp_service import WhatsAppService
-                        WhatsAppService().send_from_db_template(
+                        from .whatsapp_service import WhatsAppService  # noqa: F401 — kept dormant
+                        from .meta_whatsapp_service import MetaWhatsAppService
+                        # WhatsAppService().send_from_db_template(  # Twilio — replaced by Meta template send below
+                        #     member.mobile_no, "wa_policy_uploaded",
+                        #     {
+                        #         "member_name": member_label,
+                        #         "policy_type": policy_type_name,
+                        #     },
+                        #     partner_id=partner_id,
+                        # )
+                        MetaWhatsAppService().send_template_from_db(
                             member.mobile_no, "wa_policy_uploaded",
                             {
                                 "member_name": member_label,

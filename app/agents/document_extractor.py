@@ -19,6 +19,7 @@ class ExtractedPolicy(BaseModel):
     start_date: Optional[str] = None
     end_date: Optional[str] = None
     confidence: float = 0.0
+    policy_category: Optional[str] = None  # AI-guessed PolicyType code — resolved in policy_service
     additional_info: Optional[str] = None  # JSON string — parsed after extraction
     family_members: Optional[List[ExtractedFamilyMember]] = None
 
@@ -26,10 +27,13 @@ class ExtractedPolicy(BaseModel):
 class DocumentExtractorAgent(BaseAgent):
     agent_name = "document_extractor"
 
-    def extract(self, pdf_path: str, policy_id: Optional[str] = None) -> ExtractedPolicy:
+    def extract(self, pdf_path: str, policy_id: Optional[str] = None,
+                active_types: Optional[list] = None) -> ExtractedPolicy:
         uploaded = self.client.files.upload(file=pdf_path, config={"mime_type": "application/pdf"})
+        allowed = ", ".join(f"{t.name} ({t.code})" for t in (active_types or []))
+        prompt = DOCUMENT_EXTRACTOR.format(allowed_categories=allowed or "Other Insurance (other_insurance)")
         return self._run(
-            prompt=DOCUMENT_EXTRACTOR,
+            prompt=prompt,
             response_schema=ExtractedPolicy,
             files=[uploaded],
             reference_id=policy_id,

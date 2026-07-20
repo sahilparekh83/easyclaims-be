@@ -9,7 +9,8 @@ from ...db.queries.user_query import UserQuery
 from ...db.queries.partner_query import PartnerQuery
 from ...services.notification_helper import notify_all_admins, notify_partner
 from ...services.email_service import EmailService
-from ...services.whatsapp_service import WhatsAppService
+from ...services.whatsapp_service import WhatsAppService  # noqa: F401 — kept dormant
+from ...services.meta_whatsapp_service import MetaWhatsAppService
 from ...agents import PolicyQAAgent, ClaimAssistantAgent
 from ..deps import _require_customer_enrollment
 from ...configs.common import get_settings
@@ -137,7 +138,7 @@ async def claim_assist(body: ClaimRequest, request: Request, enrollment=Depends(
     # Email + WhatsApp to member
     settings = get_settings()
     ticket_id_str = str(ticket.id)
-    summary_str = result.incident_summary or ""
+    summary_str = result.incident_summary or "No summary provided"
     if member_email:
         try:
             EmailService().send_ticket_raised(
@@ -152,10 +153,20 @@ async def claim_assist(body: ClaimRequest, request: Request, enrollment=Depends(
             pass
     if member_mobile:
         try:
-            WhatsAppService().send_from_db_template(
+            # WhatsAppService().send_from_db_template(  # Twilio — replaced by Meta template send below
+            #     to_mobile=member_mobile,
+            #     slug="wa_ticket_raised",
+            #     context={
+            #         "member_name": member_label,
+            #         "ticket_id": ticket_id_str,
+            #         "summary": summary_str,
+            #     },
+            #     partner_id=partner_id,
+            # )
+            MetaWhatsAppService().send_template_from_db(
                 to_mobile=member_mobile,
                 slug="wa_ticket_raised",
-                context={
+                variables={
                     "member_name": member_label,
                     "ticket_id": ticket_id_str,
                     "summary": summary_str,

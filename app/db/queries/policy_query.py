@@ -3,24 +3,50 @@ from typing import Optional, List, Tuple
 from sqlalchemy import or_
 from ..models.policy import Policy
 from ..models.policy_type import PolicyType
+from ..models.user import User
+from ..models.member import FamilyMember
+from ..models.activity import PolicyFamilyMember
 from ..session import session_scope
 from .list_helper import (
     apply_global_filter, apply_field_filters, apply_sort, paginate
 )
 
 
-# columns searchable via global_filter
+# columns searchable via global_filter — includes User.name (portal account holder),
+# Policy.policy_holder_name (AI-extracted insured name — distinct field, both legitimate
+# search targets), and a narrowly-scoped JSONB clause (full-blob JSONB search is
+# intentionally descoped — only this one hot key is searched, avoiding a full-scan).
 _GLOBAL_COLS = lambda: [
-    Policy.policy_number, Policy.insurer, Policy.status, Policy.file_name, PolicyType.name
+    Policy.policy_number, Policy.insurer, Policy.status, Policy.file_name, PolicyType.name,
+    User.name, Policy.policy_holder_name,
+    Policy.extracted_fields["validation_reason"].astext,
 ]
 
-# columns addressable by filters[].field
+
+def _family_member_name_filter(query, f):
+    """EXISTS-style filter (not a plain join) so a policy linked to multiple
+    family members doesn't get duplicated across paginated rows."""
+    subq = (
+        query.session.query(PolicyFamilyMember.policy_id)
+        .join(FamilyMember, FamilyMember.id == PolicyFamilyMember.family_member_id)
+        .filter(FamilyMember.name.ilike(f"%{f.value}%"))
+    )
+    return query.filter(Policy.id.in_(subq))
+
+
+# columns/callables addressable by filters[].field
 _FILTER_MAP = {
     "policy_number": Policy.policy_number,
     "insurer":       Policy.insurer,
     "status":        Policy.status,
     "file_name":     Policy.file_name,
     "policy_type_id": Policy.policy_type_id,
+    "policy_type":   PolicyType.name,  # FE sends the type's display name, not its id
+    "member_name":   User.name,
+    "policy_holder_name": Policy.policy_holder_name,
+    "start_date":    Policy.start_date,
+    "end_date":      Policy.end_date,
+    "family_member_name": _family_member_name_filter,
 }
 
 
@@ -69,6 +95,7 @@ class PolicyQuery:
             q = (
                 session.query(Policy)
                 .join(PolicyType, Policy.policy_type_id == PolicyType.id)
+                .join(User, Policy.user_id == User.id)
                 .filter(Policy.partner_id == partner_id, Policy.is_deleted == False)
             )
             q = apply_global_filter(q, list_req.global_filter, _GLOBAL_COLS())
@@ -87,6 +114,7 @@ class PolicyQuery:
             q = (
                 session.query(Policy)
                 .join(PolicyType, Policy.policy_type_id == PolicyType.id)
+                .join(User, Policy.user_id == User.id)
                 .filter(Policy.is_deleted == False)
             )
             if partner_id:
@@ -109,6 +137,7 @@ class PolicyQuery:
             q = (
                 session.query(Policy)
                 .join(PolicyType, Policy.policy_type_id == PolicyType.id)
+                .join(User, Policy.user_id == User.id)
                 .filter(
                     Policy.user_id == user_id,
                     Policy.partner_id == partner_id,
@@ -148,7 +177,9 @@ class PolicyQuery:
                 session.flush()
 
     def update_ai_result(self, policy_id: str, extracted_fields: dict,
-                         ai_confidence: int, status: str) -> None:
+                         ai_confidence: int, status: str,
+                         policy_type_id: Optional[str] = None,
+                         policy_holder_name: Optional[str] = None) -> None:
         from datetime import date
         with session_scope() as session:
             p = session.query(Policy).filter(
@@ -158,6 +189,10 @@ class PolicyQuery:
                 p.extracted_fields = extracted_fields
                 p.ai_confidence = ai_confidence
                 p.status = status
+                if policy_type_id:
+                    p.policy_type_id = _uuid.UUID(str(policy_type_id))
+                if policy_holder_name:
+                    p.policy_holder_name = policy_holder_name
                 if extracted_fields.get("start_date"):
                     try:
                         p.start_date = date.fromisoformat(str(extracted_fields["start_date"]))
@@ -187,6 +222,22 @@ class PolicyQuery:
                         # Soft-deleted policy is squatting the number — free it up
                         conflict.policy_number = f"DEL-{conflict.id}"
                         p.policy_number = extracted_num
+                session.flush()
+
+    def update_vehicle_fields(self, policy_id: str, vehicle_number: Optional[str] = None,
+                              vehicle_type: Optional[str] = None,
+                              vehicle_owner_family_member_id: Optional[str] = None) -> None:
+        with session_scope() as session:
+            p = session.query(Policy).filter(
+                Policy.id == _uuid.UUID(policy_id), Policy.is_deleted == False
+            ).first()
+            if p:
+                if vehicle_number is not None:
+                    p.vehicle_number = vehicle_number
+                if vehicle_type is not None:
+                    p.vehicle_type = vehicle_type
+                if vehicle_owner_family_member_id is not None:
+                    p.vehicle_owner_family_member_id = _uuid.UUID(vehicle_owner_family_member_id)
                 session.flush()
 
     def update_status(self, policy_id: str, status: str) -> bool:

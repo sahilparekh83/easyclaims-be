@@ -29,6 +29,7 @@ PERMISSION_MODULES = {
     "claims":          "Claim Tickets",
     "notifications":   "Notifications",
     "email_templates": "Email Templates",
+    "whatsapp_templates": "WhatsApp Templates",
     "audit_logs":      "Audit Logs",
     "settings":        "Settings",
     "cron":            "Automation (Cron)",

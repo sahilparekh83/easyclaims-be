@@ -245,11 +245,13 @@ def run_policy_expiry_check() -> dict:
     Find active policies expiring in exactly N days (from admin settings).
     Send email + WhatsApp alert to the primary member.
     """
-    from .whatsapp_service import WhatsAppService
+    from .whatsapp_service import WhatsAppService  # noqa: F401 — kept dormant, see meta_wa below
+    from .meta_whatsapp_service import MetaWhatsAppService
     from ..db.models.policy_type import PolicyType
 
     email_svc = EmailService()
-    wa = WhatsAppService()
+    # wa = WhatsAppService()  # Twilio — replaced by Meta template send below
+    meta_wa = MetaWhatsAppService()
     nq = NotificationQuery()
     days = _get_policy_expiry_warning_days()
     target_date = date.today() + timedelta(days=days)
@@ -303,7 +305,18 @@ def run_policy_expiry_check() -> dict:
 
             if d["user_mobile"]:
                 try:
-                    wa.send_from_db_template(
+                    # wa.send_from_db_template(  # Twilio — replaced by Meta template send below
+                    #     d["user_mobile"], "wa_policy_expiry_warning",
+                    #     {
+                    #         "member_name": d["user_name"],
+                    #         "policy_type": d["policy_type"],
+                    #         "policy_number": d["policy_number"],
+                    #         "days_left": days,
+                    #         "end_date": d["end_date"],
+                    #     },
+                    #     partner_id=d["partner_id"],
+                    # )
+                    meta_wa.send_template_from_db(
                         d["user_mobile"], "wa_policy_expiry_warning",
                         {
                             "member_name": d["user_name"],
@@ -365,10 +378,12 @@ def run_policy_status_update() -> dict:
     pq = PQ()
     nq = NotificationQuery()
 
-    from .whatsapp_service import WhatsAppService
+    from .whatsapp_service import WhatsAppService  # noqa: F401 — kept dormant, see meta_wa below
+    from .meta_whatsapp_service import MetaWhatsAppService
     from ..db.models.policy_type import PolicyType
     from ..configs.common import get_settings
-    wa = WhatsAppService()
+    # wa = WhatsAppService()  # Twilio — replaced by Meta template send below
+    meta_wa = MetaWhatsAppService()
     upload_url = f"{get_settings().FRONTEND_URL}/upload"
 
     for policy_id in policy_ids:
@@ -396,7 +411,17 @@ def run_policy_status_update() -> dict:
 
                     if member.mobile_no:
                         try:
-                            wa.send_from_db_template(
+                            # wa.send_from_db_template(  # Twilio — replaced by Meta template send below
+                            #     member.mobile_no, "wa_policy_expired",
+                            #     {
+                            #         "member_name": member_name,
+                            #         "policy_type": pt_name,
+                            #         "policy_number": pol_no,
+                            #         "upload_url": upload_url,
+                            #     },
+                            #     partner_id=str(policy.partner_id),
+                            # )
+                            meta_wa.send_template_from_db(
                                 member.mobile_no, "wa_policy_expired",
                                 {
                                     "member_name": member_name,
@@ -421,6 +446,16 @@ def run_policy_status_update() -> dict:
                         )
                     except Exception:
                         logger.warning("Email failed for expired policy %s", policy_id)
+
+            try:
+                from .audit_service import AuditService
+                AuditService().log(
+                    actor_id=None, actor_type="system",
+                    action="policy_expired",
+                    entity_type="policy", entity_id=policy_id,
+                )
+            except Exception:
+                logger.warning("Failed to write audit log for expired policy %s", policy_id)
 
             expired += 1
             logger.info("Policy %s marked as expired", policy_id)
@@ -454,10 +489,12 @@ def run_document_upload_reminder() -> dict:
     and have no policy uploaded yet. Send them a WhatsApp reminder.
     """
     from ..configs.common import get_settings
-    from ..services.whatsapp_service import WhatsAppService
+    from ..services.whatsapp_service import WhatsAppService  # noqa: F401 — kept dormant, see meta_wa below
+    from ..services.meta_whatsapp_service import MetaWhatsAppService
 
     settings = get_settings()
-    wa = WhatsAppService()
+    # wa = WhatsAppService()  # Twilio — replaced by Meta template send below
+    meta_wa = MetaWhatsAppService()
     upload_url = f"{settings.FRONTEND_URL}/upload"
 
     cutoff = datetime.now(timezone.utc) - _get_upload_reminder_delay()
@@ -497,7 +534,16 @@ def run_document_upload_reminder() -> dict:
 
     for member in pending:
         try:
-            wa.send_from_db_template(
+            # wa.send_from_db_template(  # Twilio — replaced by Meta template send below
+            #     member["mobile"], "wa_upload_reminder",
+            #     {
+            #         "member_name": member["name"],
+            #         "partner_name": member["partner_name"],
+            #         "upload_url": upload_url,
+            #     },
+            #     partner_id=member["partner_id"],
+            # )
+            meta_wa.send_template_from_db(
                 member["mobile"], "wa_upload_reminder",
                 {
                     "member_name": member["name"],

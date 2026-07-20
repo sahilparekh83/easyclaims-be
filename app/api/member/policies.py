@@ -19,6 +19,10 @@ member_policies_router = APIRouter()
 class UpdatePolicyBody(BaseModel):
     family_member_ids: Optional[List[str]] = None  # set linked family members (replaces current links)
     nominee_ids: Optional[List[str]] = None         # set linked nominees (replaces current links) — Life policies
+    # Motor-specific fields — filled in after AI auto-categorization resolves the policy to Motor
+    vehicle_number: Optional[str] = None
+    vehicle_type: Optional[str] = None
+    vehicle_owner_family_member_id: Optional[str] = None
 
 
 def _get_linked_family(policy_id: str, user_id: str) -> list:
@@ -68,6 +72,7 @@ def _policy_dict(p, policy_type_name: str = None, user_id: str = None) -> dict:
         "policy_type": policy_type_name,
         "insurer": p.insurer,
         "sum_insured": p.sum_insured,
+        "policy_holder_name": p.policy_holder_name,
         "start_date": str(p.start_date) if p.start_date else None,
         "end_date": str(p.end_date) if p.end_date else None,
         "status": p.status,
@@ -165,7 +170,7 @@ async def list_policies(
 async def upload_policy(
     request: Request,
     background_tasks: BackgroundTasks,
-    policy_type_id: str = Form(...),
+    policy_type_id: Optional[str] = Form(None),
     insurer: Optional[str] = Form(None),
     sum_insured: Optional[int] = Form(None),
     vehicle_number: Optional[str] = Form(None),
@@ -178,12 +183,13 @@ async def upload_policy(
 ):
     user_id = request.state.user_payload["sub"]
     data = PolicyCreate(
-        policy_type_id=policy_type_id, insurer=insurer, sum_insured=sum_insured,
+        policy_type_id=policy_type_id or None, insurer=insurer, sum_insured=sum_insured,
         vehicle_number=vehicle_number, vehicle_type=vehicle_type,
         vehicle_owner_family_member_id=vehicle_owner_family_member_id or None,
     )
     svc = PolicyService()
-    policy = await svc.upload_policy(user_id, str(enrollment.partner_id), data, file)
+    policy = await svc.upload_policy(user_id, str(enrollment.partner_id), data, file,
+                                     actor_id=user_id, actor_type="member")
 
     if family_member_ids:
         ids = [fmid.strip() for fmid in family_member_ids.split(",") if fmid.strip()]
@@ -256,6 +262,20 @@ async def update_policy(policy_id: UUID, body: UpdatePolicyBody, request: Reques
 
     if body.nominee_ids is not None:
         _set_nominees(str(policy.id), user_id, body.nominee_ids)
+
+    if body.vehicle_owner_family_member_id:
+        owner = MemberQuery().get_family_member(body.vehicle_owner_family_member_id, user_id)
+        if not owner:
+            raise HTTPException(status_code=422, detail="Vehicle owner must be one of this member's family members")
+
+    if body.vehicle_number is not None or body.vehicle_type is not None or body.vehicle_owner_family_member_id is not None:
+        svc.query.update_vehicle_fields(
+            str(policy.id),
+            vehicle_number=body.vehicle_number,
+            vehicle_type=body.vehicle_type,
+            vehicle_owner_family_member_id=body.vehicle_owner_family_member_id,
+        )
+        policy = svc.get_policy(user_id, str(policy.id))
 
     pt = svc.get_policy_type(str(policy.policy_type_id))
     return ResponseModel.ok(data=_policy_dict(policy, pt.name if pt else None, user_id=user_id))

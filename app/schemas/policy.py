@@ -4,7 +4,10 @@ from pydantic import BaseModel
 
 
 class PolicyCreate(BaseModel):
-    policy_type_id: UUID
+    # Optional: category is now auto-detected from AI extraction. If omitted,
+    # the policy is created against a fallback "Other Insurance" type and
+    # re-categorized once background extraction completes.
+    policy_type_id: Optional[UUID] = None
     insurer: Optional[str] = None
     sum_insured: Optional[int] = None
     # Motor policy fields (only relevant when policy_type is Motor)

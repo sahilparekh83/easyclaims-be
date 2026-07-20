@@ -14,6 +14,8 @@ from ...db.queries.partner_query import PartnerQuery
 from ...db.queries.policy_type_query import PolicyTypeQuery
 from ...db.queries.member_query import MemberQuery
 from ...db.queries.activity_query import PolicyFamilyQuery, PolicyNomineeQuery
+from ...db.queries.audit_log_query import AuditLogQuery
+from ...services.audit_service import AuditService
 from ..deps import require_permission
 
 logger = logging.getLogger("easyclaims")
@@ -34,6 +36,7 @@ def _policy_dict(p, member_name=None, member_email=None,
         "policy_type": policy_type_name,
         "insurer": p.insurer,
         "sum_insured": p.sum_insured,
+        "policy_holder_name": p.policy_holder_name,
         "start_date": str(p.start_date) if p.start_date else None,
         "end_date": str(p.end_date) if p.end_date else None,
         "status": p.status,
@@ -66,7 +69,11 @@ async def list_policies(
 
     Body includes standard list fields plus:
       partner_id (optional) — scope to a specific partner
-      filters[] supports: policy_number, insurer, status, policy_type_id, file_name
+      filters[] supports: policy_number, insurer, status, policy_type_id, file_name,
+      member_name, policy_holder_name, family_member_name (all "contains"/"equals"),
+      start_date, end_date (also "gte"/"lte"/"between" — e.g. an "end_date" "between"
+      filter with [today, today+30d] implements "expiring soon"). global_filter also
+      matches member name, AI-extracted policy holder name, and validation_reason.
 
     Response shape:
     {
@@ -148,7 +155,7 @@ async def admin_upload_policy(
     background_tasks: BackgroundTasks,
     user_id: str = Form(...),
     partner_id: str = Form(...),
-    policy_type_id: str = Form(...),
+    policy_type_id: Optional[str] = Form(None),
     insurer: Optional[str] = Form(None),
     sum_insured: Optional[int] = Form(None),
     vehicle_number: Optional[str] = Form(None),
@@ -159,12 +166,14 @@ async def admin_upload_policy(
 ):
     """Admin upload a policy for any member — triggers real AI extraction."""
     data = PolicyCreate(
-        policy_type_id=policy_type_id, insurer=insurer, sum_insured=sum_insured,
+        policy_type_id=policy_type_id or None, insurer=insurer, sum_insured=sum_insured,
         vehicle_number=vehicle_number, vehicle_type=vehicle_type,
         vehicle_owner_family_member_id=vehicle_owner_family_member_id or None,
     )
     svc = PolicyService()
-    policy = await svc.upload_policy(user_id, partner_id, data, file)
+    admin_id = request.state.user_payload.get("sub") if hasattr(request.state, "user_payload") else None
+    policy = await svc.upload_policy(user_id, partner_id, data, file,
+                                     actor_id=admin_id, actor_type="admin")
     uq = UserQuery()
     member = uq.get_user_by_id(user_id)
     member_name = member.name if member else ""
@@ -327,20 +336,32 @@ async def update_policy_fields(policy_id: UUID, body: dict, _=Depends(require_pe
 
 
 @admin_policies_router.post("/{policy_id}/confirm-renewal", response_model=ResponseModel)
-async def confirm_renewal(policy_id: UUID, _=Depends(require_permission("policies", "edit"))):
+async def confirm_renewal(policy_id: UUID, request: Request, _=Depends(require_permission("policies", "edit"))):
     pq = PolicyQuery()
     ok = pq.confirm_renewal(str(policy_id))
     if not ok:
         raise HTTPException(status_code=400, detail="No pending renewal found for this policy")
+    admin_id = request.state.user_payload.get("sub") if hasattr(request.state, "user_payload") else None
+    AuditService().log(
+        actor_id=admin_id, actor_type="admin",
+        action="policy_renewal_confirmed",
+        entity_type="policy", entity_id=str(policy_id),
+    )
     return ResponseModel.ok(data={"renewed": True})
 
 
 @admin_policies_router.post("/{policy_id}/dismiss-renewal", response_model=ResponseModel)
-async def dismiss_renewal(policy_id: UUID, _=Depends(require_permission("policies", "edit"))):
+async def dismiss_renewal(policy_id: UUID, request: Request, _=Depends(require_permission("policies", "edit"))):
     pq = PolicyQuery()
     ok = pq.dismiss_renewal(str(policy_id))
     if not ok:
         raise HTTPException(status_code=404, detail="Policy not found")
+    admin_id = request.state.user_payload.get("sub") if hasattr(request.state, "user_payload") else None
+    AuditService().log(
+        actor_id=admin_id, actor_type="admin",
+        action="policy_renewal_dismissed",
+        entity_type="policy", entity_id=str(policy_id),
+    )
     return ResponseModel.ok(data={"dismissed": True})
 
 
@@ -364,3 +385,39 @@ async def get_policy(policy_id: UUID, request: Request, _=Depends(require_permis
         "extracted_fields": policy.extracted_fields,
         "storage_key": policy.storage_key,
     })
+
+
+@admin_policies_router.get("/{policy_id}/history", response_model=ResponseModel)
+async def get_policy_history(policy_id: UUID, skip: int = 0, limit: int = 50,
+                             _=Depends(require_permission("policies", "view"))):
+    """Chronological audit trail for a single policy — upload, extraction, approval/rejection, expiry, renewal events."""
+    total, rows = AuditLogQuery().list_paginated(
+        entity_type="policy", entity_id=str(policy_id), skip=skip, limit=limit,
+    )
+    uq = UserQuery()
+    actor_names: dict = {}
+
+    def _actor_name(actor_id: Optional[str]) -> Optional[str]:
+        if not actor_id:
+            return None
+        if actor_id not in actor_names:
+            u = uq.get_user_by_id(actor_id)
+            actor_names[actor_id] = u.name or u.email if u else None
+        return actor_names[actor_id]
+
+    entries = [
+        {
+            "id": str(r.id),
+            "action": r.action,
+            "actor_id": r.actor_id,
+            "actor_type": r.actor_type,
+            "actor_name": _actor_name(r.actor_id),
+            "old_value": r.old_value,
+            "new_value": r.new_value,
+            "note": r.note,
+            "created_at": r.created_at.isoformat() if r.created_at else None,
+        }
+        for r in rows
+    ]
+    entries.reverse()  # oldest → newest for a timeline display
+    return ResponseModel.ok(data={"data": entries, "total": total, "skip": skip, "limit": limit})
