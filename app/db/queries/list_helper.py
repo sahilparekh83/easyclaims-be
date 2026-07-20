@@ -4,8 +4,15 @@ Reusable helpers that apply the standard list request pattern
 to any SQLAlchemy ORM query.
 """
 from typing import Any, Dict, List, Tuple
-from sqlalchemy import asc, desc, or_
+from sqlalchemy import asc, desc, or_, cast
 from sqlalchemy.orm import Query
+
+
+def _coerce(col, value: Any):
+    """gte/lte/between values arrive as plain strings from JSON (e.g. "2026-07-20"
+    for a Date column) — cast them to the column's own SQL type so Postgres doesn't
+    reject a bare varchar-vs-date/int comparison."""
+    return cast(value, col.type)
 
 
 def _apply_op(query: Query, col, operator: str, value: Any) -> Query:
@@ -15,9 +22,9 @@ def _apply_op(query: Query, col, operator: str, value: Any) -> Query:
         "contains":   lambda: query.filter(col.ilike(f"%{value}%")),
         "startsWith": lambda: query.filter(col.ilike(f"{value}%")),
         "endsWith":   lambda: query.filter(col.ilike(f"%{value}")),
-        "gte":        lambda: query.filter(col >= value),
-        "lte":        lambda: query.filter(col <= value),
-        "between":    lambda: query.filter(col.between(value[0], value[1]))
+        "gte":        lambda: query.filter(col >= _coerce(col, value)),
+        "lte":        lambda: query.filter(col <= _coerce(col, value)),
+        "between":    lambda: query.filter(col.between(_coerce(col, value[0]), _coerce(col, value[1])))
                       if isinstance(value, (list, tuple)) and len(value) == 2 else query,
     }
     fn = ops.get(operator)
