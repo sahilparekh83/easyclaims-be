@@ -17,6 +17,7 @@ class Policy(Base):
     partner_id = Column(UUID(as_uuid=True), ForeignKey("partners.id"), nullable=False)
     policy_type_id = Column(UUID(as_uuid=True), ForeignKey("policy_types.id"), nullable=False)
     policy_number = Column(String, nullable=True, unique=True)
+    policy_holder_name = Column(String, nullable=True)
     insurer = Column(String, nullable=True)
     sum_insured = Column(BigInteger, nullable=True)
     start_date = Column(Date, nullable=True)

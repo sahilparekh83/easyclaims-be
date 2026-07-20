@@ -157,10 +157,20 @@ class MemberService:
         if not user.mobile_no:
             return
         try:
-            from .whatsapp_service import WhatsAppService
+            from .whatsapp_service import WhatsAppService  # noqa: F401 — kept dormant
+            from .meta_whatsapp_service import MetaWhatsAppService
             from ..configs.common import get_settings
             settings = get_settings()
-            WhatsAppService().send_from_db_template(
+            # WhatsAppService().send_from_db_template(  # Twilio — replaced by Meta template send below
+            #     user.mobile_no, "wa_welcome_member",
+            #     {
+            #         "member_name": user.name or "there",
+            #         "partner_name": partner.name,
+            #         "upload_url": f"{settings.FRONTEND_URL}/upload",
+            #     },
+            #     partner_id=str(partner.id),
+            # )
+            MetaWhatsAppService().send_template_from_db(
                 user.mobile_no, "wa_welcome_member",
                 {
                     "member_name": user.name or "there",
@@ -191,10 +201,20 @@ class MemberService:
         if not user.mobile_no:
             return
         try:
-            from .whatsapp_service import WhatsAppService
+            from .whatsapp_service import WhatsAppService  # noqa: F401 — kept dormant
+            from .meta_whatsapp_service import MetaWhatsAppService
             from ..configs.common import get_settings
             settings = get_settings()
-            WhatsAppService().send_from_db_template(
+            # WhatsAppService().send_from_db_template(  # Twilio — replaced by Meta template send below
+            #     user.mobile_no, "wa_new_partner",
+            #     {
+            #         "member_name": user.name or "there",
+            #         "partner_name": partner.name,
+            #         "login_url": f"{settings.FRONTEND_URL}/login",
+            #     },
+            #     partner_id=str(partner.id),
+            # )
+            MetaWhatsAppService().send_template_from_db(
                 user.mobile_no, "wa_new_partner",
                 {
                     "member_name": user.name or "there",
@@ -236,7 +256,8 @@ class MemberService:
         if not user.mobile_no:
             return
         try:
-            from .whatsapp_service import WhatsAppService
+            from .whatsapp_service import WhatsAppService  # noqa: F401 — kept dormant
+            from .meta_whatsapp_service import MetaWhatsAppService
             from .pdf_service import PdfService
             from .media_service import MediaService
             from ..configs.common import get_settings
@@ -270,20 +291,39 @@ class MemberService:
 
             benefits = []
             if getattr(plan, "benefit_aiqa", False):
-                benefits.append("• AI Health Query Assistant")
+                benefits.append("AI Health Query Assistant")
             tc = getattr(plan, "benefit_teleconsult_sessions", 0)
             if tc:
-                benefits.append(f"• Tele-consultation ({tc} sessions)")
+                benefits.append(f"Tele-consultation ({tc} sessions)")
             wc = getattr(plan, "benefit_wellness_sessions", 0)
             if wc:
-                benefits.append(f"• Wellness Sessions ({wc})")
+                benefits.append(f"Wellness Sessions ({wc})")
             if getattr(plan, "benefit_hospital_cash", False):
-                benefits.append("• Hospital Cash Benefit")
+                benefits.append("Hospital Cash Benefit")
             if getattr(plan, "benefit_emergency_assist", False):
-                benefits.append("• Emergency Assistance")
-            extra_benefits = "\n".join(benefits) if benefits else ""
+                benefits.append("Emergency Assistance")
+            # Meta template parameters can't contain newlines or be blank, so this is
+            # joined into a single comma-separated line (free-form Twilio body used
+            # "\n" per line instead — fine there since Twilio isn't sending this as a
+            # positional template parameter).
+            extra_benefits = ", ".join(benefits) if benefits else "No additional add-ons"
 
-            WhatsAppService().send_from_db_template(
+            # WhatsAppService().send_from_db_template(  # Twilio — replaced by Meta template send below
+            #     user.mobile_no, "wa_membership_card",
+            #     {
+            #         "member_name": user.name or user.email,
+            #         "partner_name": partner.name,
+            #         "plan_name": plan.name,
+            #         "benefit_family": plan.benefit_family,
+            #         "benefit_slots": plan.benefit_slots,
+            #         "benefit_claim": plan.benefit_claim,
+            #         "extra_benefits": extra_benefits,
+            #         "login_url": f"{settings.FRONTEND_URL}/login",
+            #     },
+            #     partner_id=str(partner.id),
+            #     media_url=media_url,
+            # )
+            MetaWhatsAppService().send_template_from_db(
                 user.mobile_no, "wa_membership_card",
                 {
                     "member_name": user.name or user.email,

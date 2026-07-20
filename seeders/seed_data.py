@@ -65,6 +65,17 @@ EMAIL_TEMPLATES = [
 </body></html>""",
     },
     {
+        "slug": "policy_active_member",
+        "description": "Sent to member when their policy is approved and goes active",
+        "subject": "Policy Approved — {{ policy_number }}",
+        "html_body": """<html><body>
+<p>Dear {{ member_name }},</p>
+<p>Good news! Your policy <strong>{{ policy_number }}</strong> has been verified and is now <strong>Active</strong>.</p>
+<p>You can view the full details anytime from your EasyClaims dashboard.</p>
+<p>— EasyClaims Team</p>
+</body></html>""",
+    },
+    {
         "slug": "policy_uploaded_partner",
         "description": "Sent to partner when a member uploads a policy",
         "subject": "New Policy Uploaded by Member — {{ policy_number }}",
@@ -405,6 +416,15 @@ WHATSAPP_TEMPLATES = [
         ),
     },
     {
+        "slug": "wa_policy_approved",
+        "description": "Sent to member when their policy is approved and goes active",
+        "html_body": (
+            "Hi {{ member_name }}! ✅\n\n"
+            "Your *{{ policy_type }}* policy (*{{ policy_number }}*) has been verified and is now *Active*.\n\n"
+            "You can view the full details anytime on your EasyClaims dashboard."
+        ),
+    },
+    {
         "slug": "wa_policy_expired",
         "description": "Sent to member when a policy has expired",
         "html_body": (
@@ -505,10 +525,72 @@ def seed_email_templates():
     logger.info("WhatsApp templates seeded: %d entries", len(WHATSAPP_TEMPLATES))
 
 
+# Meta WhatsApp Cloud API template metadata — separate from WHATSAPP_TEMPLATES
+# above (those hold the free-form Jinja bodies used by the Twilio flow). Meta's
+# approved templates need fixed copy + positional {{1}},{{2}}.. variables instead,
+# so each row here just tracks which variables (and in what order) the eventual
+# Meta-approved template expects. meta_template_name stays blank until an admin
+# fills it in after the template is created + approved in Meta Business Manager.
+WHATSAPP_META_TEMPLATES = [
+    {"slug": "wa_welcome_member", "variable_order": ["member_name", "partner_name", "upload_url"],
+     "description": "Sent to a new member on first enrollment"},
+    {"slug": "wa_new_partner", "variable_order": ["member_name", "partner_name", "login_url"],
+     "description": "Sent to an existing member when a new partner is added"},
+    {"slug": "wa_membership_card",
+     "variable_order": ["member_name", "partner_name", "plan_name", "benefit_family",
+                         "benefit_slots", "benefit_claim", "extra_benefits", "login_url"],
+     "header_type": "document",
+     "description": "Sent with the membership card PDF after enrollment"},
+    {"slug": "wa_policy_uploaded", "variable_order": ["member_name", "policy_type"],
+     "description": "Sent to member when their policy document is received"},
+    {"slug": "wa_policy_rejected", "variable_order": ["member_name", "policy_number", "reason"],
+     "description": "Sent to member when their uploaded document fails verification"},
+    {"slug": "wa_policy_approved", "variable_order": ["member_name", "policy_type", "policy_number"],
+     "description": "Sent to member when their policy is approved and goes active"},
+    {"slug": "wa_policy_expired",
+     "variable_order": ["member_name", "policy_type", "policy_number", "upload_url"],
+     "description": "Sent to member when a policy has expired"},
+    {"slug": "wa_upload_reminder", "variable_order": ["member_name", "partner_name", "upload_url"],
+     "description": "Reminder sent to members who haven't uploaded a policy document"},
+    {"slug": "wa_policy_expiry_warning",
+     "variable_order": ["member_name", "policy_type", "policy_number", "days_left", "end_date"],
+     "description": "Sent to member when a policy is about to expire"},
+    {"slug": "wa_ticket_raised", "variable_order": ["member_name", "ticket_id", "summary"],
+     "description": "Sent to member when their claim ticket is created"},
+    {"slug": "wa_claim_assigned_agent",
+     "variable_order": ["agent_name", "claim_number", "member_name", "policy_number"],
+     "description": "Sent to a claim agent via WhatsApp when a claim is assigned or reassigned to them"},
+    {"slug": "wa_claim_status_update_member",
+     "variable_order": ["member_name", "claim_number", "new_status", "remark"],
+     "description": "Sent to the member via WhatsApp when their claim's status changes"},
+    {"slug": "wa_claim_submitted_admin",
+     "variable_order": ["claim_number", "member_name", "agent_name"],
+     "description": "Sent to superadmins via WhatsApp when a new claim is submitted"},
+    {"slug": "wa_partner_welcome", "variable_order": ["partner_name", "portal_url"],
+     "description": "Sent to a new partner account's registered mobile on creation. "
+                     "Deliberately omits email — Meta's classifier flags labeled "
+                     "'Login at:'/'Email:' pairs as Authentication-category content."},
+]
+
+
+def seed_whatsapp_meta_templates():
+    from app.db.queries.whatsapp_template_query import WhatsAppTemplateQuery
+    tq = WhatsAppTemplateQuery()
+    for tpl in WHATSAPP_META_TEMPLATES:
+        tq.create_if_not_exists(
+            slug=tpl["slug"],
+            variable_order=tpl["variable_order"],
+            header_type=tpl.get("header_type"),
+            description=tpl.get("description", ""),
+        )
+    logger.info("WhatsApp (Meta) template rows seeded: %d entries", len(WHATSAPP_META_TEMPLATES))
+
+
 def run_seed():
     try:
         seed_roles()
         seed_email_templates()
+        seed_whatsapp_meta_templates()
         logger.info("Seeding complete")
     except Exception as exc:
         logger.warning("Seeding failed (DB may not be ready): %s", exc)

@@ -155,6 +155,7 @@ class Settings(BaseSettings):
         "/policy-types",
         "/partner-types",
         "/webhook/whatsapp/incoming",
+        "/webhook/whatsapp/meta",
         "/static",
     ]
 
@@ -167,6 +168,14 @@ class Settings(BaseSettings):
     TWILIO_AUTH_TOKEN: str = os.getenv("TWILIO_AUTH_TOKEN", "")
     TWILIO_WHATSAPP_FROM: str = os.getenv("TWILIO_WHATSAPP_FROM", "whatsapp:+14155238886")
     TWILIO_CONTENT_SID: str = os.getenv("TWILIO_CONTENT_SID", "")
+
+    # ── Meta WhatsApp Cloud API ───────────────────────────────────────────────
+    META_WHATSAPP_PHONE_NUMBER_ID: str = os.getenv("META_WHATSAPP_PHONE_NUMBER_ID", "")
+    META_WHATSAPP_ACCESS_TOKEN: str = os.getenv("META_WHATSAPP_ACCESS_TOKEN", "")
+    META_WHATSAPP_APP_SECRET: str = os.getenv("META_WHATSAPP_APP_SECRET", "")
+    META_WHATSAPP_VERIFY_TOKEN: str = os.getenv("META_WHATSAPP_VERIFY_TOKEN", "")
+    META_WHATSAPP_API_VERSION: str = os.getenv("META_WHATSAPP_API_VERSION", "v20.0")
+    META_WHATSAPP_BUSINESS_ACCOUNT_ID: str = os.getenv("META_WHATSAPP_BUSINESS_ACCOUNT_ID", "")
 
     # ── Logging ───────────────────────────────────────────────────────────────
     LOG_LEVEL: str = os.getenv("LOG_LEVEL", "DEBUG").upper()

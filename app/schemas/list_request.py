@@ -4,7 +4,9 @@ from pydantic import BaseModel, Field
 
 class FilterOption(BaseModel):
     field: str
-    operator: Literal["equals", "notEquals", "contains", "startsWith", "endsWith"] = "equals"
+    operator: Literal[
+        "equals", "notEquals", "contains", "startsWith", "endsWith", "gte", "lte", "between",
+    ] = "equals"
     value: Any
 
 

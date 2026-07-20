@@ -15,6 +15,10 @@ def _apply_op(query: Query, col, operator: str, value: Any) -> Query:
         "contains":   lambda: query.filter(col.ilike(f"%{value}%")),
         "startsWith": lambda: query.filter(col.ilike(f"{value}%")),
         "endsWith":   lambda: query.filter(col.ilike(f"%{value}")),
+        "gte":        lambda: query.filter(col >= value),
+        "lte":        lambda: query.filter(col <= value),
+        "between":    lambda: query.filter(col.between(value[0], value[1]))
+                      if isinstance(value, (list, tuple)) and len(value) == 2 else query,
     }
     fn = ops.get(operator)
     return fn() if fn else query
@@ -31,12 +35,17 @@ def apply_global_filter(query: Query, global_filter: str, columns: List) -> Quer
 
 
 def apply_field_filters(query: Query, filters, column_map: Dict[str, Any]) -> Query:
-    """Apply each FilterOption against column_map (field → SA column)."""
+    """Apply each FilterOption against column_map (field → SA column, or a
+    callable (query, filter_option) -> query for filters that need custom
+    logic, e.g. an EXISTS subquery across a join table)."""
     for f in (filters or []):
         col = column_map.get(f.field)
         if col is None:
             continue
-        query = _apply_op(query, col, f.operator, f.value)
+        if callable(col):
+            query = col(query, f)
+        else:
+            query = _apply_op(query, col, f.operator, f.value)
     return query
 
 

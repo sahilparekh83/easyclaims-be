@@ -9,6 +9,7 @@ from .policy_type import PolicyType
 from .policy import Policy
 from .activity import UserActivity, PolicyFamilyMember, PolicyNominee, Notification
 from .email_template import EmailTemplate
+from .whatsapp_template import WhatsAppTemplate
 from .enrollment_history import EnrollmentHistory
 from .system_setting import SystemSetting
 from .llm_usage import LLMUsage
@@ -25,6 +26,7 @@ __all__ = [
     "PolicyType", "Policy",
     "UserActivity", "PolicyFamilyMember", "PolicyNominee", "Notification",
     "EmailTemplate",
+    "WhatsAppTemplate",
     "EnrollmentHistory",
     "SystemSetting",
     "LLMUsage",
