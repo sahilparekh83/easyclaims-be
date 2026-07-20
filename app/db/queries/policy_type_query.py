@@ -57,3 +57,16 @@ class PolicyTypeQuery:
             session.flush()
             session.expunge(row)
             return row
+
+    def count_linked_policies(self, policy_type_id: str) -> int:
+        from ..models.policy import Policy
+        with session_scope() as session:
+            return session.query(Policy).filter(Policy.policy_type_id == policy_type_id).count()
+
+    def delete(self, policy_type_id: str) -> bool:
+        with session_scope() as session:
+            row = session.query(PolicyType).filter(PolicyType.id == policy_type_id).first()
+            if not row:
+                return False
+            session.delete(row)
+            return True

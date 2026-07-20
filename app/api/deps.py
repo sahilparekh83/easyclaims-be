@@ -26,6 +26,18 @@ def require_permission(module: str, action: str):
     return _dep
 
 
+def require_superadmin(request: Request):
+    """Dependency for views that must stay SUPERADMIN-only regardless of any
+    permission grant — e.g. cross-agent workload overviews that shouldn't be
+    reachable just because a role happens to hold the underlying module permission."""
+    payload = getattr(request.state, "user_payload", None)
+    if not payload:
+        raise HTTPException(status_code=403, detail="Not authenticated")
+    if not _is_superadmin(payload):
+        raise HTTPException(status_code=403, detail="Superadmin access required")
+    return payload
+
+
 def _require_partner(request: Request):
     payload = getattr(request.state, "user_payload", None)
     if not payload:

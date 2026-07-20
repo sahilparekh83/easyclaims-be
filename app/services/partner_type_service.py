@@ -50,8 +50,24 @@ class PartnerTypeService:
         self.get(partner_type_id)
         return self.query.toggle_active(partner_type_id, is_active)
 
+    def linked_count(self, partner_type_id: str) -> int:
+        return self.query.count_linked_partners(partner_type_id)
+
+    def delete(self, partner_type_id: str) -> None:
+        self.get(partner_type_id)
+        count = self.linked_count(partner_type_id)
+        if count > 0:
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    f"Cannot delete: {count} partner{'s are' if count != 1 else ' is'} "
+                    "linked to this partner type. Deactivate it instead."
+                ),
+            )
+        self.query.delete(partner_type_id)
+
     @staticmethod
-    def to_dict(pt: PartnerType) -> dict:
+    def to_dict(pt: PartnerType, linked_count: int = None) -> dict:
         return {
             "id": str(pt.id),
             "name": pt.name,
@@ -59,4 +75,6 @@ class PartnerTypeService:
             "description": pt.description,
             "is_active": pt.is_active,
             "created_at": pt.created_at.isoformat() if pt.created_at else None,
+            "linked_count": linked_count,
+            "can_delete": (linked_count == 0) if linked_count is not None else None,
         }

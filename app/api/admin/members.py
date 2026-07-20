@@ -1,8 +1,8 @@
 from uuid import UUID
 from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile, File, Form
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
-import openpyxl, io
 from ...schemas.base import ResponseModel
 from ...schemas.member import MemberCreate, AdminMemberUpdate, ChangeRequestCreate, ChangeRequestReview
 from ...schemas.list_request import MemberListRequest
@@ -153,164 +153,30 @@ async def create_member(body: MemberCreate, request: Request, _=Depends(require_
     })
 
 
-def _resolve_plan_for_row(partner_id: str, plan_code: Optional[str]) -> tuple:
-    """Resolve the plan to enroll this row into via its mandatory 'Plan Code' column.
-    Returns (plan_id, error_message)."""
-    from ...db.models.partner import PartnerPlan
-    from ...db.session import session_scope
-
-    if not plan_code:
-        return None, "Plan Code is required"
-    plan = PlanQuery().get_by_code(plan_code)
-    if not plan or plan.status != "Active":
-        return None, f"Plan Code '{plan_code}' not found or not active"
-    if plan.plan_type == "partner":
-        with session_scope() as s:
-            linked = s.query(PartnerPlan).filter(
-                PartnerPlan.partner_id == partner_id, PartnerPlan.plan_id == plan.id,
-            ).first()
-        if not linked:
-            return None, f"Plan Code '{plan_code}' is not assigned to this partner"
-    return str(plan.id), None
-
-
 @admin_members_router.post("/bulk-upload", response_model=ResponseModel, status_code=201)
 async def bulk_upload_members(
     request: Request,
     file: UploadFile = File(...),
-    partner_id: str = Form(...),
+    partner_id: Optional[str] = Form(None),
     _=Depends(require_permission("members", "add")),
 ):
     """
     Upload an Excel file with member rows. Expected columns (case-insensitive):
     Sale Date | Primary Member Full Name | Gender | Primary Mobile No. | Primary Email ID |
     Address Line1 | City | State | Pin Code | Sales Channel | Partner Branch Code |
-    Sales Person Name | Employee Code | Data 1 | Data 2 | Data 3
+    Sales Person Name | Employee Code | Data 1 | Data 2 | Data 3 | Partner Code | Plan Code
+
+    Each row resolves its own partner via 'Partner Code'; partner_id is only a
+    fallback for files that omit that column (single-partner uploads).
     """
+    from ...services.member_bulk_upload_service import process_member_bulk_upload
+
     contents = await file.read()
-    try:
-        wb = openpyxl.load_workbook(filename=io.BytesIO(contents), read_only=True, data_only=True)
-    except Exception:
-        raise HTTPException(status_code=422, detail="Invalid Excel file")
+    results = process_member_bulk_upload(contents, fallback_partner_id=partner_id)
+    created_by_partner = results.pop("created_by_partner")
 
-    ws = wb.active
-    rows = list(ws.iter_rows(values_only=True))
-    if not rows:
-        raise HTTPException(status_code=422, detail="Excel file is empty")
-
-    header = [str(c).strip().lower() if c else "" for c in rows[0]]
-    COL_MAP = {
-        # name variants
-        "primary member full name": "name", "full name": "name", "name": "name",
-        "member name": "name",
-        # email variants
-        "primary email id": "email", "email id": "email", "email": "email",
-        # mobile variants
-        "primary mobile no.": "mobile_no", "primary mobile no": "mobile_no",
-        "mobile number": "mobile_no", "mobile no": "mobile_no",
-        "mobile no.": "mobile_no", "mobile": "mobile_no",
-        "phone": "mobile_no", "phone number": "mobile_no",
-        # gender
-        "gender": "gender",
-        # address variants
-        "address line1": "address_line", "address line 1": "address_line",
-        "address": "address_line", "address line": "address_line",
-        # city / state / pin
-        "city": "address_city",
-        "state": "address_state",
-        "pin code": "address_pin", "pin": "address_pin",
-        "pincode": "address_pin", "postal code": "address_pin",
-        # optional fields
-        "sale date": "sale_date",
-        "sales channel": "sales_channel",
-        "partner branch code": "branch_code", "branch code": "branch_code",
-        "sales person name": "salesperson_name", "salesperson name": "salesperson_name",
-        "employee code": "employee_code",
-        "data 1": "data1", "data1": "data1",
-        "data 2": "data2", "data2": "data2",
-        "data 3": "data3", "data3": "data3",
-        # plan
-        "plan": "plan_name", "plan name": "plan_name",
-        "plan code": "plan_code", "plancode": "plan_code",
-    }
-    col_idx = {}
-    for i, h in enumerate(header):
-        mapped = COL_MAP.get(h)
-        if mapped:
-            col_idx[mapped] = i
-
-    MANDATORY = {"name", "mobile_no", "email", "plan_code"}
-    missing_cols = MANDATORY - set(col_idx.keys())
-    if missing_cols:
-        raise HTTPException(status_code=422, detail=f"Missing mandatory columns: {missing_cols}")
-
-    svc = MemberService()
     admin_id = request.state.user_id if hasattr(request.state, "user_id") else "admin"
     ip = request.client.host if request.client else None
-    results = {"created": [], "skipped": [], "errors": []}
-
-    for row_num, row in enumerate(rows[1:], start=2):
-        def cell(field, _row=row):
-            idx = col_idx.get(field)
-            if idx is None:
-                return None
-            v = _row[idx]
-            return str(v).strip() if v is not None else None
-
-        email = cell("email")
-        name = cell("name")
-        mobile = cell("mobile_no")
-        gender = cell("gender")
-        addr = cell("address_line")
-        city = cell("address_city")
-        state = cell("address_state")
-        pin = cell("address_pin")
-        plan_code = cell("plan_code")
-
-        if not email:
-            results["skipped"].append({"row": row_num, "reason": "empty email"})
-            continue
-
-        missing_mandatory = [f for f, v in [("name", name), ("mobile_no", mobile), ("plan_code", plan_code)] if not v]
-        if missing_mandatory:
-            results["errors"].append({"row": row_num, "email": email, "reason": f"Missing: {missing_mandatory}"})
-            continue
-
-        import datetime as _dt
-        sale_date_raw = cell("sale_date")
-        sale_date = None
-        if sale_date_raw:
-            try:
-                sale_date = _dt.date.fromisoformat(sale_date_raw)
-            except Exception:
-                pass
-
-        resolved_plan_id, plan_error = _resolve_plan_for_row(partner_id, plan_code)
-        if plan_error:
-            results["errors"].append({"row": row_num, "email": email, "reason": plan_error})
-            continue
-
-        try:
-            member_data = MemberCreate(
-                email=email, name=name, mobile_no=mobile, gender=gender,
-                address_line=addr, address_city=city, address_state=state, address_pin=pin,
-                partner_id=partner_id, plan_id=resolved_plan_id,
-                sale_date=sale_date,
-                sales_channel=cell("sales_channel"),
-                branch_code=cell("branch_code"),
-                salesperson_name=cell("salesperson_name"),
-                employee_code=cell("employee_code"),
-                data1=cell("data1"),
-                data2=cell("data2"),
-                data3=cell("data3"),
-            )
-            result = svc.create_member(member_data)
-            results["created"].append({"row": row_num, "email": email, "id": str(result["user"].id)})
-        except HTTPException as e:
-            results["skipped"].append({"row": row_num, "email": email, "reason": e.detail})
-        except Exception as e:
-            results["errors"].append({"row": row_num, "email": email, "reason": str(e)})
-
     AuditService().log(
         actor_id=admin_id, actor_type="admin",
         action="bulk_upload",
@@ -318,20 +184,45 @@ async def bulk_upload_members(
         note=f"Bulk upload: {len(results['created'])} created, {len(results['skipped'])} skipped, {len(results['errors'])} errors",
         ip_address=ip,
     )
-    if results["created"] and partner_id:
+    if created_by_partner:
         from ...services.notification_helper import notify_partner
-        notify_partner(
-            partner_id=partner_id,
-            type="new_member",
-            title=f"{len(results['created'])} new member(s) added via bulk upload",
-            body=f"{len(results['created'])} member(s) were enrolled under your account.",
-            ref_id=partner_id,
-            ref_type="partner",
-        )
-    return ResponseModel.ok(data={
-        "total_rows": len(rows) - 1,
-        **results,
-    })
+        for pid, count in created_by_partner.items():
+            notify_partner(
+                partner_id=pid,
+                type="new_member",
+                title=f"{count} new member(s) added via bulk upload",
+                body=f"{count} member(s) were enrolled under your account.",
+                ref_id=pid,
+                ref_type="partner",
+            )
+    return ResponseModel.ok(data=results)
+
+
+@admin_members_router.get("/bulk-upload/sample", response_model=None)
+async def admin_member_bulk_sample_multi(
+    partner_ids: str,
+    _=Depends(require_permission("members", "add")),
+):
+    """Sample Excel for a bulk upload spanning one or more partners — each row
+    carries its own Partner Code + Plan Code. `partner_ids` is comma-separated;
+    only Active partners contribute rows (others are silently skipped)."""
+    from ...services.member_bulk_upload_service import generate_sample_workbook
+
+    ids = [p.strip() for p in partner_ids.split(",") if p.strip()]
+    if not ids:
+        raise HTTPException(status_code=422, detail="Select at least one partner")
+
+    pq = PartnerQuery()
+    partners = [p for p in (pq.get_by_id(pid) for pid in ids) if p and p.status == "Active"]
+    if not partners:
+        raise HTTPException(status_code=422, detail="None of the selected partners are Active")
+
+    buf = generate_sample_workbook(partners)
+    return StreamingResponse(
+        buf,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": "attachment; filename=member_upload_sample.xlsx"},
+    )
 
 
 @admin_members_router.get("/change-requests", response_model=ResponseModel)

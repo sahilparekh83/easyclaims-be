@@ -11,7 +11,8 @@ admin_partner_types_router = APIRouter()
 @admin_partner_types_router.get("", response_model=ResponseModel)
 async def list_partner_types(request: Request, _=Depends(require_permission("partner_types", "view"))):
     svc = PartnerTypeService()
-    return ResponseModel.ok(data=[svc.to_dict(pt) for pt in svc.list_all()])
+    data = [svc.to_dict(pt, linked_count=svc.linked_count(str(pt.id))) for pt in svc.list_all()]
+    return ResponseModel.ok(data=data)
 
 
 @admin_partner_types_router.post("", response_model=ResponseModel, status_code=201)
@@ -26,7 +27,16 @@ async def create_partner_type(body: PartnerTypeCreate, request: Request,
 async def get_partner_type(partner_type_id: UUID, request: Request,
                            _=Depends(require_permission("partner_types", "view"))):
     svc = PartnerTypeService()
-    return ResponseModel.ok(data=svc.to_dict(svc.get(str(partner_type_id))))
+    pt = svc.get(str(partner_type_id))
+    return ResponseModel.ok(data=svc.to_dict(pt, linked_count=svc.linked_count(str(partner_type_id))))
+
+
+@admin_partner_types_router.delete("/{partner_type_id}", response_model=ResponseModel)
+async def delete_partner_type(partner_type_id: UUID, request: Request,
+                              _=Depends(require_permission("partner_types", "delete"))):
+    svc = PartnerTypeService()
+    svc.delete(str(partner_type_id))
+    return ResponseModel.ok(data={"deleted": True})
 
 
 @admin_partner_types_router.patch("/{partner_type_id}", response_model=ResponseModel)

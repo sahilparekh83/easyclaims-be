@@ -239,6 +239,52 @@ class PolicyClaimService:
             partner_id=partner_id, user_id=user_id, search=search, date_from=date_from, date_to=date_to,
         )
 
+    def get_agents_overview(self, skip: int = 0, limit: int = 50, active_only: bool = False):
+        """CLAIMS_AGENT-role users (active or deactivated account) with their total
+        claim count and per-status breakdown — for the claim-agents admin listing."""
+        agent_ids = self.role_query.list_user_ids_with_role_name("CLAIMS_AGENT")
+        agents = self.user_query.get_users_by_ids(agent_ids)
+        if active_only:
+            agents = [a for a in agents if a.is_active]
+        agents.sort(key=lambda a: (a.name or a.email or "").lower())
+
+        total = len(agents)
+        page = agents[skip:skip + limit]
+        page_ids = [str(a.id) for a in page]
+        counts = self.query.count_by_agent_and_status(page_ids)
+
+        result = []
+        for a in page:
+            status_counts = counts.get(str(a.id), {})
+            result.append({
+                "id": str(a.id),
+                "name": a.name or a.email,
+                "email": a.email,
+                "is_active": a.is_active,
+                "total_claims": sum(status_counts.values()),
+                "status_counts": status_counts,
+            })
+        return total, result
+
+    def get_agent_overview(self, agent_id: str):
+        """Single agent's workload summary — for the Claim Agents detail page header.
+        Returns None if the user doesn't exist or doesn't hold the CLAIMS_AGENT role."""
+        agent_ids = self.role_query.list_user_ids_with_role_name("CLAIMS_AGENT")
+        if str(agent_id) not in [str(a) for a in agent_ids]:
+            return None
+        user = self.user_query.get_user_by_id(agent_id)
+        if not user:
+            return None
+        status_counts = self.query.count_by_agent_and_status([agent_id]).get(str(agent_id), {})
+        return {
+            "id": str(user.id),
+            "name": user.name or user.email,
+            "email": user.email,
+            "is_active": user.is_active,
+            "total_claims": sum(status_counts.values()),
+            "status_counts": status_counts,
+        }
+
     # ── Mutations ────────────────────────────────────────────────────────────
 
     def update_status(self, claim_id: str, data: ClaimStatusUpdate, payload: dict):

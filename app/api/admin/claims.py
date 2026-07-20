@@ -16,7 +16,7 @@ from ...db.queries.plan_query import PlanQuery
 from ...db.queries.role_query import RoleQuery
 from ...db.queries.policy_claim_query import PolicyClaimQuery
 from ...storage import get_storage
-from ..deps import require_permission
+from ..deps import require_permission, require_superadmin
 
 admin_claims_router = APIRouter()
 
@@ -128,6 +128,37 @@ async def list_claim_agents(_=Depends(require_permission("claims", "view"))):
         if u:
             agents.append({"id": str(u.id), "name": u.name or u.email, "email": u.email})
     return ResponseModel.ok(data=agents)
+
+
+@admin_claims_router.get("/agents/overview", response_model=ResponseModel)
+async def list_claim_agents_overview(
+    skip: int = 0, limit: int = 50, active_only: bool = False,
+    _=Depends(require_superadmin),
+):
+    """CLAIMS_AGENT users (active + deactivated accounts) with total claims handled
+    and a per-status breakdown, paginated — for the Claim Agents admin page.
+    Superadmin-only: this is cross-agent workload data, not scoped to "your own"."""
+    total, agents = PolicyClaimService().get_agents_overview(skip=skip, limit=limit, active_only=active_only)
+    return ResponseModel.ok(data={"data": agents, "total": total, "skip": skip, "limit": limit})
+
+
+@admin_claims_router.get("/agents/overview/{agent_id}", response_model=ResponseModel)
+async def get_claim_agent_overview(
+    agent_id: UUID, request: Request, _=Depends(require_permission("claims", "view")),
+):
+    """Single agent's workload summary — used by the (superadmin-only) Claim
+    Agents detail page, and by an agent's own dashboard to show their own
+    "My Claims" tile. Anyone with claims:view may fetch their own overview;
+    only SUPERADMIN may fetch someone else's."""
+    payload = getattr(request.state, "user_payload", {}) or {}
+    is_superadmin = payload.get("user_type") == "SUPERADMIN" or "SUPERADMIN" in payload.get("roles", [])
+    if not is_superadmin and str(agent_id) != str(payload.get("sub")):
+        raise HTTPException(status_code=403, detail="You can only view your own claim workload")
+
+    agent = PolicyClaimService().get_agent_overview(str(agent_id))
+    if not agent:
+        raise HTTPException(status_code=404, detail="Claim agent not found")
+    return ResponseModel.ok(data=agent)
 
 
 @admin_claims_router.get("/{claim_id}", response_model=ResponseModel)
