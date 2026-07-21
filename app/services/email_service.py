@@ -211,6 +211,17 @@ class EmailService:
             "policy_number": policy_number,
         }, partner_id=partner_id)
 
+    def send_policy_rejected_admin(self, to_email: str, member_name: str, member_email: str,
+                                   partner_name: str, policy_number: str, reason: str) -> bool:
+        # Admin-facing — always the system default, no partner override applies.
+        return self.send_from_template(to_email, "policy_rejected_admin", {
+            "member_name": member_name,
+            "member_email": member_email,
+            "partner_name": partner_name,
+            "policy_number": policy_number,
+            "reason": reason,
+        })
+
     def send_plan_changed(self, to_email: str, member_name: str,
                           old_plan: str, new_plan: str, changed_by: str, partner_id: str = None) -> bool:
         return self.send_from_template(to_email, "plan_changed", {

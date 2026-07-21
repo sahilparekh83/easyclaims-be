@@ -58,8 +58,12 @@ def run_ai_extraction(policy_id: str, storage_key: str, member_name: str) -> Non
             except (ValueError, TypeError):
                 pass
 
-        # Determine status based on validation result — need_review is skipped, policies go active directly
+        # Determine status based on validation result. name_match is an explicit gate: even if the
+        # LLM only flags it as "review" (not a hard "reject"), a member who doesn't appear anywhere
+        # in the document (not the insured, not a nominee/family member) must not be auto-approved.
         if validation.status == "reject" or not validation.document_type_valid:
+            final_status = "rejected"
+        elif not validation.name_match:
             final_status = "rejected"
         else:
             final_status = "active"
@@ -140,6 +144,18 @@ def run_ai_extraction(policy_id: str, storage_key: str, member_name: str) -> Non
                 )
             except Exception:
                 logger.warning("Failed to send rejection admin/partner notification for policy %s", policy_id)
+            try:
+                from .notification_helper import get_admin_users
+                partner_record = PartnerQuery().get_by_id(str(policy.partner_id))
+                partner_name = partner_record.name if partner_record else "Unknown"
+                for admin in get_admin_users():
+                    EmailService().send_policy_rejected_admin(
+                        admin.email, member.name or member.email, member.email,
+                        partner_name, pol_no,
+                        validation.reason or "Document does not appear to be a valid insurance policy.",
+                    )
+            except Exception:
+                logger.warning("Failed to send rejection admin email for policy %s", policy_id)
             AuditService().log(
                 actor_id=None, actor_type="system",
                 action="policy_rejected",

@@ -45,7 +45,12 @@ Today's Date: {today}
 
 Validate:
 1. document_type_valid: Is this clearly an insurance policy (Health / Motor / Life)?
-2. name_match: Does insured_name closely match member name? Allow minor spelling differences.
+2. name_match: Does the member's name appear ANYWHERE in this document as a covered person — as
+   insured_name (the primary policyholder), OR as one of the entries in family_members (e.g. a family
+   floater dependent), OR as a nominee in additional_info (nominee_name and similar fields)? Allow minor
+   spelling differences. A member does not have to be the primary insured to count as a match — being
+   listed as a nominee or family member covered under someone else's policy (e.g. a spouse's or parent's
+   policy) is a valid match too, since they can still claim under it.
 3. not_expired: Is end_date in the future compared to today?
 4. Future start_date: Policies are often purchased 15-30 days before their start_date — this is normal advance
    purchase behaviour, NOT a validation problem. A start_date up to 30 days in the future is valid and must

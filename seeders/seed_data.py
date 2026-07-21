@@ -108,6 +108,32 @@ EMAIL_TEMPLATES = [
 </body></html>""",
     },
     {
+        "slug": "policy_rejected_member",
+        "description": "Sent to member when their uploaded policy is auto-rejected",
+        "subject": "Policy Rejected — {{ policy_number }}",
+        "html_body": """<html><body>
+<p>Dear {{ member_name }},</p>
+<p>We were unable to verify your uploaded policy <strong>{{ policy_number }}</strong>, so it has been <strong>Rejected</strong>.</p>
+<p>Please re-upload the correct document from your EasyClaims dashboard, or contact your partner if you believe this is a mistake.</p>
+<p>— EasyClaims Team</p>
+</body></html>""",
+    },
+    {
+        "slug": "policy_rejected_admin",
+        "description": "Sent to admin when a policy is auto-rejected",
+        "subject": "[Admin] Policy Rejected — {{ policy_number }}",
+        "html_body": """<html><body>
+<p>An uploaded policy was auto-rejected and may need attention.</p>
+<table style="border-collapse:collapse;margin:16px 0">
+  <tr><td style="padding:4px 12px 4px 0;color:#666">Policy Number</td><td><strong>{{ policy_number }}</strong></td></tr>
+  <tr><td style="padding:4px 12px 4px 0;color:#666">Member</td><td>{{ member_name }} ({{ member_email }})</td></tr>
+  <tr><td style="padding:4px 12px 4px 0;color:#666">Partner</td><td>{{ partner_name }}</td></tr>
+  <tr><td style="padding:4px 12px 4px 0;color:#666">Reason</td><td>{{ reason }}</td></tr>
+</table>
+<p>— EasyClaims System</p>
+</body></html>""",
+    },
+    {
         "slug": "plan_expiry_warning",
         "description": "Sent to member 2 days before plan expires",
         "subject": "Your EasyClaims Plan Expires in {{ days_left }} Day{% if days_left != 1 %}s{% endif %}",
