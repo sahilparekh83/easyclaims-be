@@ -7,16 +7,22 @@ from ..constants import UserType
 logger = logging.getLogger("easyclaims")
 
 
+def get_admin_users() -> list:
+    """Active SUPERADMIN + ADMIN users, detached from the session."""
+    with session_scope() as session:
+        admins = session.query(User).filter(
+            User.user_type.in_([UserType.SUPERADMIN, UserType.ADMIN]),
+            User.is_active == True,
+            User.is_deleted == False,
+        ).all()
+        for a in admins:
+            session.expunge(a)
+    return admins
+
+
 def notify_all_admins(type: str, title: str, body: str, ref_id: str, ref_type: str):
     try:
-        with session_scope() as session:
-            admins = session.query(User).filter(
-                User.user_type == UserType.SUPERADMIN,
-                User.is_active == True,
-                User.is_deleted == False,
-            ).all()
-            for a in admins:
-                session.expunge(a)
+        admins = get_admin_users()
         nq = NotificationQuery()
         for admin in admins:
             nq.create(
