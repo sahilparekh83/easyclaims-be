@@ -85,6 +85,13 @@ class PolicyQuery:
                 session.expunge(p)
             return p
 
+    def get_by_policy_number(self, policy_number: str) -> Optional[Policy]:
+        with session_scope() as session:
+            p = session.query(Policy).filter(Policy.policy_number == policy_number).first()
+            if p:
+                session.expunge(p)
+            return p
+
     # ── paginated list (POST /list pattern) ───────────────────────────────────
 
     def list_paginated_by_partner(
@@ -121,6 +128,28 @@ class PolicyQuery:
                 q = q.filter(Policy.partner_id == partner_id)
             if user_id:
                 q = q.filter(Policy.user_id == user_id)
+            q = apply_global_filter(q, list_req.global_filter, _GLOBAL_COLS())
+            q = apply_field_filters(q, list_req.filters, _FILTER_MAP)
+            q = apply_sort(q, Policy, list_req.sort_field, list_req.sort_order)
+            total, rows = paginate(q, list_req.skip, list_req.limit)
+            for r in rows:
+                session.expunge(r)
+            return total, rows
+
+    def list_paginated_by_user(
+        self, user_id: str, list_req
+    ) -> Tuple[int, List[Policy]]:
+        """For member portal: own policies across every partner enrolled with."""
+        with session_scope() as session:
+            q = (
+                session.query(Policy)
+                .join(PolicyType, Policy.policy_type_id == PolicyType.id)
+                .join(User, Policy.user_id == User.id)
+                .filter(
+                    Policy.user_id == user_id,
+                    Policy.is_deleted == False,
+                )
+            )
             q = apply_global_filter(q, list_req.global_filter, _GLOBAL_COLS())
             q = apply_field_filters(q, list_req.filters, _FILTER_MAP)
             q = apply_sort(q, Policy, list_req.sort_field, list_req.sort_order)

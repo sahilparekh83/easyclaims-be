@@ -117,6 +117,24 @@ async def list_claims(body: ListFilters, request: Request, _=Depends(require_per
     })
 
 
+class SearchFilters(BaseModel):
+    search: str
+    skip: int = 0
+    limit: int = 50
+
+
+@admin_claims_router.post("/search-all", response_model=ResponseModel)
+async def search_all_claims(body: SearchFilters, _=Depends(require_permission("claims", "view"))):
+    """Cross-agent claim lookup by claim number, member name/email, or member code —
+    available to both SUPERADMIN and CLAIMS_AGENT, never scoped to "your own claims"."""
+    if not body.search.strip():
+        return ResponseModel.ok(data={"data": [], "total": 0, "skip": body.skip, "limit": body.limit})
+    total, claims = PolicyClaimService().search_all_claims(body.search.strip(), skip=body.skip, limit=body.limit)
+    return ResponseModel.ok(data={
+        "data": [_claim_dict(c) for c in claims], "total": total, "skip": body.skip, "limit": body.limit,
+    })
+
+
 @admin_claims_router.get("/agents", response_model=ResponseModel)
 async def list_claim_agents(_=Depends(require_permission("claims", "view"))):
     """Active users holding the CLAIMS_AGENT role — for the reassignment dropdown."""

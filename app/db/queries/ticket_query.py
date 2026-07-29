@@ -3,6 +3,7 @@ from datetime import datetime, timedelta, timezone
 from typing import List, Optional
 from ..session import session_scope
 from ..models.ticket import Ticket
+from ...utils.code_generator import generate_unique_code
 
 DUPLICATE_WINDOW_HOURS = 48
 
@@ -13,13 +14,22 @@ def utcnow():
 
 class TicketQuery:
 
+    def get_by_ticket_number(self, ticket_number: str) -> Optional[Ticket]:
+        with session_scope() as session:
+            t = session.query(Ticket).filter(Ticket.ticket_number == ticket_number).first()
+            if t:
+                session.expunge(t)
+            return t
+
     def create(self, channel: str, category: str, priority: str = "medium",
                summary: str = None, user_id: str = None, partner_id: str = None,
                ref_policy_id: str = None, is_duplicate: bool = False,
                duplicate_of_ticket_id: str = None) -> Ticket:
         with session_scope() as session:
+            ticket_number = generate_unique_code("TCK", lambda code: bool(self.get_by_ticket_number(code)))
             t = Ticket(
                 id=uuid.uuid4(),
+                ticket_number=ticket_number,
                 user_id=user_id,
                 partner_id=partner_id,
                 channel=channel,

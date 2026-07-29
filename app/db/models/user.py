@@ -19,6 +19,8 @@ class User(Base):
     name = Column(String, nullable=True)
     mobile_no = Column(String, nullable=True)
     user_type = Column(SAEnum(UserType), nullable=False)
+    member_code = Column(String, unique=True, nullable=True)  # set for CUSTOMER-type users, e.g. 'MEM-2026-000042'
+    agent_code = Column(String, unique=True, nullable=True)   # set when the CLAIMS_AGENT role is granted, e.g. 'AGT-2026-000042'
     is_active = Column(Boolean, default=True, nullable=False)
     is_deleted = Column(Boolean, default=False, nullable=False)
     created_at = Column(DateTime(timezone=True), default=utcnow)

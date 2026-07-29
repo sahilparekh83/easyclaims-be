@@ -8,21 +8,14 @@ from ..db.queries.partner_type_query import PartnerTypeQuery
 from ..db.models.partner import Partner
 from ..schemas.partner import PartnerCreate, PartnerUpdate
 from ..constants import UserType
+from ..utils.code_generator import generate_unique_code
 
 logger = logging.getLogger("easyclaims")
 
-_PARTNER_CODE_PREFIX = "ECPTR"
-
 
 def _generate_partner_code(query: PartnerQuery) -> str:
-    """Auto-generate a unique partner code: fixed 'ECPTR' prefix + sequential
-    number, e.g. 'ECPTR-0001'. Only the number changes between partners."""
-    n = 1
-    while True:
-        code = f"{_PARTNER_CODE_PREFIX}-{n:04d}"
-        if not query.get_by_code(code):
-            return code
-        n += 1
+    """Auto-generate a unique partner code, e.g. 'PTR-2026-000042'."""
+    return generate_unique_code("PTR", lambda code: bool(query.get_by_code(code)))
 
 
 class PartnerService:

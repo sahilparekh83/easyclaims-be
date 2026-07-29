@@ -13,6 +13,7 @@ class Ticket(Base):
     __tablename__ = "tickets"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    ticket_number = Column(String, unique=True, nullable=True)  # e.g. 'TCK-2026-000042'
     user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)
     partner_id = Column(UUID(as_uuid=True), ForeignKey("partners.id"), nullable=True)
     channel = Column(String, nullable=False)          # "Portal" | "WhatsApp" | "Email"

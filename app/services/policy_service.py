@@ -1,6 +1,5 @@
 import logging
 import uuid
-from datetime import datetime
 from typing import List, Optional
 from fastapi import HTTPException, UploadFile
 from ..db.queries.policy_query import PolicyQuery
@@ -12,6 +11,7 @@ from ..schemas.policy import PolicyCreate
 from ..storage import get_storage
 from .email_service import EmailService
 from .audit_service import AuditService
+from ..utils.code_generator import generate_unique_code
 
 logger = logging.getLogger(__name__)
 
@@ -451,7 +451,10 @@ def _detect_and_link_renewal(policy, extracted, pq) -> None:
 
 
 def _gen_policy_number() -> str:
-    return f"POL-{datetime.now().year}-{str(uuid.uuid4().int)[:6].zfill(6)}"
+    """Auto-generate a unique placeholder policy number, e.g. 'POL-2026-000042'.
+    Gets overwritten by the insurer's own printed number once AI extraction finds one
+    (see PolicyQuery.update_ai_result)."""
+    return generate_unique_code("POL", lambda code: bool(PolicyQuery().get_by_policy_number(code)))
 
 
 def _storage_key(partner_id: str, user_id: str, policy_id: str, file_name: str) -> str:

@@ -15,6 +15,7 @@ from ..schemas.member import (
     ConsentCreate,
 )
 from ..constants import UserType
+from ..utils.code_generator import generate_unique_code
 
 logger = logging.getLogger(__name__)
 
@@ -53,6 +54,8 @@ class MemberService:
                 email=str(data.email), name=data.name,
                 user_type=UserType.CUSTOMER, mobile_no=data.mobile_no,
             )
+            member_code = generate_unique_code("MEM", lambda code: bool(self.user_q.get_by_member_code(code)))
+            user = self.user_q.update_user(str(user.id), member_code=member_code)
 
         if data.plan_id:
             plan = self.plan_q.get_by_id(data.plan_id)

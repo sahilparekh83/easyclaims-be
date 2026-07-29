@@ -10,7 +10,7 @@ member_profile_router = APIRouter()
 def _build_profile(user, profile) -> dict:
     return {
         "id": str(user.id), "email": user.email, "name": user.name,
-        "mobile_no": user.mobile_no,
+        "mobile_no": user.mobile_no, "member_code": user.member_code,
         "gender": profile.gender if profile else None,
         "dob": str(profile.dob) if profile and profile.dob else None,
         "address_line": profile.address_line if profile else None,

@@ -14,6 +14,7 @@ _VALID_STATUSES = ("open", "in_progress", "resolved")
 def _ticket_dict(t, member_name=None, member_email=None, partner_name=None) -> dict:
     return {
         "id": str(t.id),
+        "ticket_number": t.ticket_number,
         "channel": t.channel,
         "category": t.category,
         "priority": t.priority,

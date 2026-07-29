@@ -8,10 +8,12 @@ from ...storage import get_storage
 from ...schemas.policy import PolicyCreate
 from ...schemas.list_request import PolicyListRequest
 from ...services.policy_service import PolicyService, run_ai_extraction
+from ...services.member_service import MemberService
 from ...db.queries.policy_query import PolicyQuery
 from ...db.queries.member_query import MemberQuery
+from ...db.queries.partner_query import PartnerQuery
 from ...db.queries.activity_query import PolicyFamilyQuery, PolicyNomineeQuery
-from ..deps import _require_customer_enrollment
+from ..deps import _require_customer
 
 member_policies_router = APIRouter()
 
@@ -62,12 +64,16 @@ def _get_linked_nominees(policy_id: str, user_id: str) -> list:
     return result
 
 
-def _policy_dict(p, policy_type_name: str = None, user_id: str = None) -> dict:
+def _policy_dict(p, policy_type_name: str = None, user_id: str = None,
+                 partner_name: str = None, partner_code: str = None) -> dict:
     linked = _get_linked_family(str(p.id), user_id) if user_id else []
     nominees = _get_linked_nominees(str(p.id), user_id) if user_id else []
     return {
         "id": str(p.id),
         "policy_number": p.policy_number,
+        "partner_id": str(p.partner_id),
+        "partner_name": partner_name,
+        "partner_code": partner_code,
         "policy_type_id": str(p.policy_type_id),
         "policy_type": policy_type_name,
         "insurer": p.insurer,
@@ -89,10 +95,18 @@ def _policy_dict(p, policy_type_name: str = None, user_id: str = None) -> dict:
 
 
 def _enrich(policies, svc: PolicyService, user_id: str) -> list:
+    partners: dict = {}
+    pq_partner = PartnerQuery()
     result = []
     for p in policies:
         pt = svc.get_policy_type(str(p.policy_type_id))
-        result.append(_policy_dict(p, pt.name if pt else None, user_id=user_id))
+        pid = str(p.partner_id)
+        if pid not in partners:
+            partner = pq_partner.get_by_id(pid)
+            partners[pid] = (partner.name if partner else None, partner.partner_code if partner else None)
+        partner_name, partner_code = partners[pid]
+        result.append(_policy_dict(p, pt.name if pt else None, user_id=user_id,
+                                   partner_name=partner_name, partner_code=partner_code))
     return result
 
 
@@ -150,14 +164,12 @@ def _set_nominees(policy_id: str, user_id: str, nominee_ids: List[str]) -> None:
 async def list_policies(
     body: PolicyListRequest,
     request: Request,
-    enrollment=Depends(_require_customer_enrollment),
+    _=Depends(_require_customer),
 ):
     user_id = request.state.user_payload["sub"]
     pq = PolicyQuery()
     svc = PolicyService()
-    total, policies = pq.list_paginated_by_user_partner(
-        user_id, str(enrollment.partner_id), body
-    )
+    total, policies = pq.list_paginated_by_user(user_id, body)
     return ResponseModel.ok(data={
         "data": _enrich(policies, svc, user_id),
         "total": total,
@@ -170,6 +182,7 @@ async def list_policies(
 async def upload_policy(
     request: Request,
     background_tasks: BackgroundTasks,
+    partner_id: str = Form(..., description="Which partner enrollment this policy belongs to"),
     policy_type_id: Optional[str] = Form(None),
     insurer: Optional[str] = Form(None),
     sum_insured: Optional[int] = Form(None),
@@ -179,9 +192,12 @@ async def upload_policy(
     family_member_ids: Optional[str] = Form(None, description="Comma-separated family member UUIDs"),
     nominee_ids: Optional[str] = Form(None, description="Comma-separated nominee UUIDs — Life policies"),
     file: UploadFile = File(...),
-    enrollment=Depends(_require_customer_enrollment),
+    _=Depends(_require_customer),
 ):
     user_id = request.state.user_payload["sub"]
+    # Validates partner_id is a genuine active enrollment for this member (403 otherwise) —
+    # same check the old X-Partner-Id header path used, just fed from the form instead.
+    enrollment = MemberService().get_active_enrollment(user_id, partner_id)
     data = PolicyCreate(
         policy_type_id=policy_type_id or None, insurer=insurer, sum_insured=sum_insured,
         vehicle_number=vehicle_number, vehicle_type=vehicle_type,
@@ -205,12 +221,15 @@ async def upload_policy(
     background_tasks.add_task(run_ai_extraction, str(policy.id), policy.storage_key, member_name)
 
     pt = svc.get_policy_type(str(policy.policy_type_id))
-    return ResponseModel.ok(data=_policy_dict(policy, pt.name if pt else None, user_id=user_id))
+    partner = PartnerQuery().get_by_id(str(policy.partner_id))
+    return ResponseModel.ok(data=_policy_dict(policy, pt.name if pt else None, user_id=user_id,
+                                              partner_name=partner.name if partner else None,
+                                              partner_code=partner.partner_code if partner else None))
 
 
 @member_policies_router.get("/{policy_id}/view")
 async def view_policy_pdf(policy_id: UUID, request: Request,
-                          enrollment=Depends(_require_customer_enrollment)):
+                          _=Depends(_require_customer)):
     user_id = request.state.user_payload["sub"]
     svc = PolicyService()
     policy = svc.get_policy(user_id, str(policy_id))
@@ -224,7 +243,7 @@ async def view_policy_pdf(policy_id: UUID, request: Request,
 
 @member_policies_router.get("/{policy_id}/download")
 async def download_policy_pdf(policy_id: UUID, request: Request,
-                              enrollment=Depends(_require_customer_enrollment)):
+                              _=Depends(_require_customer)):
     user_id = request.state.user_payload["sub"]
     svc = PolicyService()
     policy = svc.get_policy(user_id, str(policy_id))
@@ -238,17 +257,20 @@ async def download_policy_pdf(policy_id: UUID, request: Request,
 
 @member_policies_router.get("/{policy_id}", response_model=ResponseModel)
 async def get_policy(policy_id: UUID, request: Request,
-                     enrollment=Depends(_require_customer_enrollment)):
+                     _=Depends(_require_customer)):
     user_id = request.state.user_payload["sub"]
     svc = PolicyService()
     policy = svc.get_policy(user_id, str(policy_id))
     pt = svc.get_policy_type(str(policy.policy_type_id))
-    return ResponseModel.ok(data=_policy_dict(policy, pt.name if pt else None, user_id=user_id))
+    partner = PartnerQuery().get_by_id(str(policy.partner_id))
+    return ResponseModel.ok(data=_policy_dict(policy, pt.name if pt else None, user_id=user_id,
+                                              partner_name=partner.name if partner else None,
+                                              partner_code=partner.partner_code if partner else None))
 
 
 @member_policies_router.patch("/{policy_id}", response_model=ResponseModel)
 async def update_policy(policy_id: UUID, body: UpdatePolicyBody, request: Request,
-                        enrollment=Depends(_require_customer_enrollment)):
+                        _=Depends(_require_customer)):
     """
     Update a policy's linked family members.
     Pass family_member_ids to replace the current set (empty list = remove all).
@@ -278,12 +300,15 @@ async def update_policy(policy_id: UUID, body: UpdatePolicyBody, request: Reques
         policy = svc.get_policy(user_id, str(policy.id))
 
     pt = svc.get_policy_type(str(policy.policy_type_id))
-    return ResponseModel.ok(data=_policy_dict(policy, pt.name if pt else None, user_id=user_id))
+    partner = PartnerQuery().get_by_id(str(policy.partner_id))
+    return ResponseModel.ok(data=_policy_dict(policy, pt.name if pt else None, user_id=user_id,
+                                              partner_name=partner.name if partner else None,
+                                              partner_code=partner.partner_code if partner else None))
 
 
 @member_policies_router.delete("/{policy_id}", response_model=ResponseModel)
 async def delete_policy(policy_id: UUID, request: Request,
-                        enrollment=Depends(_require_customer_enrollment)):
+                        _=Depends(_require_customer)):
     user_id = request.state.user_payload["sub"]
     PolicyService().delete_policy(user_id, str(policy_id))
     return ResponseModel.ok(data={"message": "Policy removed"})

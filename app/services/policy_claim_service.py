@@ -15,6 +15,7 @@ from .whatsapp_service import WhatsAppService  # noqa: F401 — kept dormant, se
 from .meta_whatsapp_service import MetaWhatsAppService
 from .notification_helper import notify_all_admins
 from ..db.queries.activity_query import NotificationQuery
+from ..utils.code_generator import generate_unique_code
 
 logger = logging.getLogger("easyclaims")
 
@@ -33,12 +34,8 @@ class PolicyClaimService:
     # ── Claim number ─────────────────────────────────────────────────────────
 
     def _generate_claim_number(self) -> str:
-        n = self.query.count_all() + 1
-        while True:
-            code = f"CLM-{n:06d}"
-            if not self.query.get_by_claim_number(code):
-                return code
-            n += 1
+        """Auto-generate a unique claim number, e.g. 'CLM-2026-000042'."""
+        return generate_unique_code("CLM", lambda code: bool(self.query.get_by_claim_number(code)))
 
     # ── Round robin ──────────────────────────────────────────────────────────
 
@@ -223,11 +220,11 @@ class PolicyClaimService:
         return claim
 
     def _assert_agent_can_access(self, claim, payload: dict) -> None:
-        is_superadmin = payload.get("user_type") == "SUPERADMIN" or "SUPERADMIN" in payload.get("roles", [])
-        if is_superadmin:
-            return
-        if str(claim.assigned_agent_id) != str(payload.get("sub")):
-            raise HTTPException(status_code=403, detail="This claim isn't assigned to you")
+        # Any user reaching here already holds claims:view/edit permission (route-gated) —
+        # both SUPERADMIN and CLAIMS_AGENT may view/comment/change status on any claim, not
+        # just their own assigned queue. Reassignment is separately gated to superadmin only,
+        # at the route level (see admin/claims.py::reassign_claim / bulk_assign_claims).
+        return
 
     def list_paginated(self, payload: dict, skip=0, limit=50, status=None, statuses=None, partner_id=None,
                        assigned_agent_id=None, user_id=None, search=None, date_from=None, date_to=None):
@@ -238,6 +235,12 @@ class PolicyClaimService:
             skip=skip, limit=limit, status=status, statuses=statuses, assigned_agent_id=assigned_agent_id,
             partner_id=partner_id, user_id=user_id, search=search, date_from=date_from, date_to=date_to,
         )
+
+    def search_all_claims(self, search: str, skip: int = 0, limit: int = 50):
+        """Cross-agent claim lookup by claim number, member name/email, or member code —
+        unlike list_paginated, never scoped to the caller's own assigned queue. Used by the
+        "Search Claims" menu, open to both SUPERADMIN and CLAIMS_AGENT."""
+        return self.query.list_paginated(skip=skip, limit=limit, search=search)
 
     def get_agents_overview(self, skip: int = 0, limit: int = 50, active_only: bool = False):
         """CLAIMS_AGENT-role users (active or deactivated account) with their total

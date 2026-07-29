@@ -6,6 +6,8 @@ from ..schemas.user import UserCreate, UserUpdate, AssignRoleRequest
 from ..services.user_service import UserService
 from ..db.queries.role_query import RoleQuery
 from ..db.queries.permission_query import PermissionQuery
+from ..db.queries.user_query import UserQuery
+from ..utils.code_generator import generate_unique_code
 from .deps import require_permission
 
 users_router = APIRouter()
@@ -47,6 +49,8 @@ def _user_to_response(user, user_service: UserService) -> dict:
         "roles": roles,
         "permissions": permissions,
         "is_superadmin": is_superadmin,
+        "member_code": user.member_code,
+        "agent_code": user.agent_code,
     }
 
 
@@ -99,6 +103,15 @@ async def assign_role(user_id: UUID, body: AssignRoleRequest, request: Request, 
     payload = getattr(request.state, "user_payload", {})
     assigned_by = payload.get("sub")
     RoleQuery().assign_role(str(user_id), str(body.role_id), assigned_by=assigned_by)
+
+    role = RoleQuery().get_role_by_id(str(body.role_id))
+    if role and role.role_name == "CLAIMS_AGENT":
+        user_query = UserQuery()
+        user = user_query.get_user_by_id(str(user_id))
+        if user and not user.agent_code:
+            agent_code = generate_unique_code("AGT", lambda code: bool(user_query.get_by_agent_code(code)))
+            user_query.update_user(str(user_id), agent_code=agent_code)
+
     return ResponseModel.ok(data={"message": "Role assigned"})
 
 

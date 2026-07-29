@@ -1,9 +1,9 @@
-import re
 from typing import List
 from fastapi import HTTPException
 from ..db.queries.plan_query import PlanQuery
 from ..db.models.plan import MembershipPlan
 from ..schemas.plan import PlanCreate, PlanUpdate
+from ..utils.code_generator import generate_unique_code
 
 
 def _benefits_to_db(b) -> dict:
@@ -21,17 +21,9 @@ def _benefits_to_db(b) -> dict:
     }
 
 
-def _generate_plan_code(name: str, query: PlanQuery) -> str:
-    """Auto-generate a unique plan code from the plan name, e.g.
-    'EbixCash Insurance Assistance Membership' -> 'EIAM-001'."""
-    words = re.findall(r"[A-Za-z0-9]+", name)
-    initials = "".join(w[0] for w in words if w).upper()[:6] or "PLAN"
-    n = 1
-    while True:
-        code = f"{initials}-{n:03d}"
-        if not query.get_by_code(code):
-            return code
-        n += 1
+def _generate_plan_code(query: PlanQuery) -> str:
+    """Auto-generate a unique plan code, e.g. 'PLN-2026-000042'."""
+    return generate_unique_code("PLN", lambda code: bool(query.get_by_code(code)))
 
 
 class PlanService:
@@ -57,7 +49,7 @@ class PlanService:
         if self.query.get_by_name(data.name):
             raise HTTPException(status_code=409, detail="Plan name already exists")
         kwargs = {
-            "name": data.name, "plan_code": _generate_plan_code(data.name, self.query),
+            "name": data.name, "plan_code": _generate_plan_code(self.query),
             "tagline": data.tagline, "info_text": data.info_text,
             "price": data.price, "cycle": data.cycle, "plan_type": data.plan_type,
             "status": data.status, "color": data.color, "popular": data.popular,

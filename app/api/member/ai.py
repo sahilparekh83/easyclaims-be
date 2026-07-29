@@ -7,12 +7,13 @@ from ...db.queries.member_query import MemberQuery
 from ...db.queries.ticket_query import TicketQuery
 from ...db.queries.user_query import UserQuery
 from ...db.queries.partner_query import PartnerQuery
+from ...services.member_service import MemberService
 from ...services.notification_helper import notify_all_admins, notify_partner
 from ...services.email_service import EmailService
 from ...services.whatsapp_service import WhatsAppService  # noqa: F401 — kept dormant
 from ...services.meta_whatsapp_service import MetaWhatsAppService
 from ...agents import PolicyQAAgent, ClaimAssistantAgent
-from ..deps import _require_customer_enrollment
+from ..deps import _require_customer
 from ...configs.common import get_settings
 
 member_ai_router = APIRouter()
@@ -27,21 +28,24 @@ class QARequest(BaseModel):
 
 
 @member_ai_router.post("/qa", response_model=ResponseModel)
-async def policy_qa(body: QARequest, request: Request, enrollment=Depends(_require_customer_enrollment)):
+async def policy_qa(body: QARequest, request: Request, _=Depends(_require_customer)):
     """Answer a member's question about their policy using AI."""
     pq = PolicyQuery()
-    user_id = str(enrollment.user_id)
-    partner_id = str(enrollment.partner_id)
+    user_id = request.state.user_payload["sub"]
 
-    # Get policy data — use specific policy or most recent
+    # Get policy data — use specific policy (any partner) or most recent overall
     if body.policy_id:
         policy = pq.get_by_id(body.policy_id, user_id=user_id)
     else:
-        policies = pq.list_by_user_partner(user_id, partner_id)
-        policy = policies[0] if policies else None
+        policies = pq.list_by_user(user_id)
+        policy = max(policies, key=lambda p: p.created_at) if policies else None
 
     if not policy:
         raise HTTPException(status_code=404, detail="No policy found")
+
+    # Membership status/expiry come from whichever partner this specific policy
+    # belongs to — not a header-selected "active" partner.
+    enrollment = MemberService().get_active_enrollment(user_id, str(policy.partner_id))
 
     policy_data = policy.extracted_fields or {
         "policy_number": policy.policy_number,
@@ -71,17 +75,23 @@ class ClaimRequest(BaseModel):
 
 
 @member_ai_router.post("/claim", response_model=ResponseModel)
-async def claim_assist(body: ClaimRequest, request: Request, enrollment=Depends(_require_customer_enrollment)):
+async def claim_assist(body: ClaimRequest, request: Request, _=Depends(_require_customer)):
     """AI-assisted claim filing — returns document checklist and next steps."""
     pq = PolicyQuery()
-    user_id = str(enrollment.user_id)
-    partner_id = str(enrollment.partner_id)
+    user_id = request.state.user_payload["sub"]
 
     if body.policy_id:
         policy = pq.get_by_id(body.policy_id, user_id=user_id)
     else:
-        policies = pq.list_by_user_partner(user_id, partner_id)
-        policy = policies[0] if policies else None
+        policies = pq.list_by_user(user_id)
+        policy = max(policies, key=lambda p: p.created_at) if policies else None
+
+    # Attribute the new ticket to the referenced policy's own partner — not a
+    # header-selected "active" partner, which could mismatch the policy.
+    partner_id = (
+        str(policy.partner_id) if policy
+        else str(MemberService().get_active_enrollment(user_id, None).partner_id)
+    )
 
     policy_data = {}
     if policy:
@@ -176,20 +186,27 @@ async def claim_assist(body: ClaimRequest, request: Request, enrollment=Depends(
         except Exception:
             pass
 
-    return ResponseModel.ok(data={**result.model_dump(), "ticket_id": ticket_id_str, "is_duplicate": ticket.is_duplicate})
+    return ResponseModel.ok(data={
+        **result.model_dump(),
+        "ticket_id": ticket_id_str,
+        "ticket_number": ticket.ticket_number,
+        "is_duplicate": ticket.is_duplicate,
+    })
 
 
 @member_ai_router.get("/tickets", response_model=ResponseModel)
 async def list_member_tickets(
+    request: Request,
     skip: int = 0,
     limit: int = 20,
-    enrollment=Depends(_require_customer_enrollment),
+    _=Depends(_require_customer),
 ):
-    user_id = str(enrollment.user_id)
+    user_id = request.state.user_payload["sub"]
     tickets = TicketQuery().list_by_user(user_id=user_id, skip=skip, limit=limit)
     return ResponseModel.ok(data=[
         {
             "id": str(t.id),
+            "ticket_number": t.ticket_number,
             "category": t.category,
             "priority": t.priority,
             "status": t.status,

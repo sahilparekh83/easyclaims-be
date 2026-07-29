@@ -1,8 +1,9 @@
 import uuid as _uuid
 from datetime import datetime, timezone
 from typing import Dict, List, Optional, Tuple
-from sqlalchemy import func
+from sqlalchemy import func, or_
 from ..models.policy_claim import PolicyClaim, PolicyClaimDocument, ClaimActivityLog
+from ..models.user import User
 from ..session import session_scope
 
 
@@ -85,7 +86,12 @@ class PolicyClaimQuery:
             if user_id:
                 q = q.filter(PolicyClaim.user_id == _uuid.UUID(str(user_id)))
             if search:
-                q = q.filter(PolicyClaim.claim_number.ilike(f"%{search}%"))
+                q = q.join(User, User.id == PolicyClaim.user_id).filter(or_(
+                    PolicyClaim.claim_number.ilike(f"%{search}%"),
+                    User.name.ilike(f"%{search}%"),
+                    User.email.ilike(f"%{search}%"),
+                    User.member_code.ilike(f"%{search}%"),
+                ))
             if date_from:
                 q = q.filter(PolicyClaim.created_at >= date_from)
             if date_to:

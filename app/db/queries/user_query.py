@@ -87,6 +87,20 @@ class UserQuery:
                 session.expunge(u)
             return users
 
+    def get_by_member_code(self, member_code: str) -> Optional[User]:
+        with session_scope() as session:
+            u = session.query(User).filter(User.member_code == member_code).first()
+            if u:
+                session.expunge(u)
+            return u
+
+    def get_by_agent_code(self, agent_code: str) -> Optional[User]:
+        with session_scope() as session:
+            u = session.query(User).filter(User.agent_code == agent_code).first()
+            if u:
+                session.expunge(u)
+            return u
+
     def create_user(self, email: str, name: str, user_type: str, mobile_no: str = None) -> User:
         with session_scope() as session:
             user = User(email=email.lower(), name=name, user_type=user_type, mobile_no=mobile_no)
