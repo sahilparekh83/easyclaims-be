@@ -58,12 +58,8 @@ def run_ai_extraction(policy_id: str, storage_key: str, member_name: str) -> Non
             except (ValueError, TypeError):
                 pass
 
-        # Determine status based on validation result. name_match is an explicit gate: even if the
-        # LLM only flags it as "review" (not a hard "reject"), a member who doesn't appear anywhere
-        # in the document (not the insured, not a nominee/family member) must not be auto-approved.
+        # Determine status based on validation result.
         if validation.status == "reject" or not validation.document_type_valid:
-            final_status = "rejected"
-        elif not validation.name_match:
             final_status = "rejected"
         else:
             final_status = "active"
