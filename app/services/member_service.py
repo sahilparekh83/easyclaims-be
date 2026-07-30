@@ -41,6 +41,14 @@ class MemberService:
         is_new_user = False
         existing = self.user_q.get_user_by_email(str(data.email))
         if existing:
+            if existing.user_type != UserType.CUSTOMER:
+                type_label = existing.user_type.value.title()
+                article = "an" if type_label[0] in "AEIOU" else "a"
+                raise HTTPException(
+                    status_code=409,
+                    detail=f"This email ({data.email}) is already registered as {article} "
+                           f"{type_label} account.",
+                )
             # Block re-enrollment under the same partner
             if data.partner_id and self.q.get_enrollment(str(existing.id), data.partner_id):
                 raise HTTPException(

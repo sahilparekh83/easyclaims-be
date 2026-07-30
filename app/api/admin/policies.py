@@ -28,7 +28,7 @@ def _notify_admins(type: str, title: str, body: str, ref_id: str, ref_type: str)
 
 
 def _policy_dict(p, member_name=None, member_email=None,
-                 partner_name=None, policy_type_name=None) -> dict:
+                 partner_name=None, partner_code=None, policy_type_name=None) -> dict:
     return {
         "id": str(p.id),
         "policy_number": p.policy_number,
@@ -46,6 +46,7 @@ def _policy_dict(p, member_name=None, member_email=None,
         "member_email": member_email,
         "partner_id": str(p.partner_id),
         "partner_name": partner_name,
+        "partner_code": partner_code,
         "file_name": p.file_name,
         "has_file": bool(p.storage_key),
         "extracted_fields": p.extracted_fields or {},
@@ -135,6 +136,7 @@ async def list_policies(
             member_name=u.name if u else None,
             member_email=u.email if u else None,
             partner_name=pa.name if pa else None,
+            partner_code=pa.partner_code if pa else None,
             policy_type_name=pt.name if pt else None,
         )
         d["linked_family_members"] = linked_family
@@ -380,6 +382,7 @@ async def get_policy(policy_id: UUID, request: Request, _=Depends(require_permis
             member_name=member.name if member else None,
             member_email=member.email if member else None,
             partner_name=partner.name if partner else None,
+            partner_code=partner.partner_code if partner else None,
             policy_type_name=pt.name if pt else None,
         ),
         "extracted_fields": policy.extracted_fields,

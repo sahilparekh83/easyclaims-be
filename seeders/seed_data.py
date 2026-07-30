@@ -324,6 +324,27 @@ EMAIL_TEMPLATES = [
 </body></html>""",
     },
     {
+        "slug": "claim_submitted_member",
+        "description": "Sent to the member confirming their claim has been received",
+        "subject": "We've received your claim — {{ claim_number }}",
+        "html_body": """<html><body style="font-family:Arial,sans-serif;color:#222;max-width:600px;margin:0 auto">
+<div style="background:#0a2257;padding:20px 28px;border-radius:10px 10px 0 0">
+  <span style="color:#fff;font-size:20px;font-weight:800">EasyClaims</span>
+  <div style="color:#93c5fd;font-size:12px;margin-top:2px">Claim Received</div>
+</div>
+<div style="background:#fff;border:1px solid #e2e8f0;border-top:none;padding:28px;border-radius:0 0 10px 10px">
+  <p>Dear <strong>{{ member_name }}</strong>,</p>
+  <p>We've received your claim and it's now being reviewed{% if agent_name %} by <strong>{{ agent_name }}</strong>{% endif %}.</p>
+  <table style="width:100%;border-collapse:collapse;background:#f0f9ff;border-radius:10px;overflow:hidden;margin:16px 0">
+    <tr style="background:#e0f2fe"><td style="padding:10px 16px;font-size:12px;color:#555;font-weight:600;width:160px">Claim Number</td><td style="padding:10px 16px;font-weight:700;font-family:monospace">{{ claim_number }}</td></tr>
+    <tr><td style="padding:10px 16px;font-size:12px;color:#555;font-weight:600">Policy</td><td style="padding:10px 16px;font-size:13px">{{ policy_number }}</td></tr>
+  </table>
+  <p style="color:#666;font-size:13px">We'll notify you as soon as there's an update on your claim's status.</p>
+  <p style="color:#888;font-size:12px;margin-top:24px">— EasyClaims Team</p>
+</div>
+</body></html>""",
+    },
+    {
         "slug": "membership_card",
         "description": "Membership card email sent after enrollment — PDF card attached, shows partner/plan/benefits",
         "subject": "Your EasyClaims Membership Card — {{ plan_name }}",

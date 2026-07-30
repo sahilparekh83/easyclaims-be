@@ -79,6 +79,27 @@ class PolicyClaimService:
             except Exception:
                 logger.exception("Failed to WhatsApp claim agent %s", agent.mobile_no)
 
+    def _notify_member_claim_submitted(self, claim, member, policy_number: str, agent_name: Optional[str]) -> None:
+        """Confirms receipt to the member who filed the claim — sent regardless of
+        whether an agent could be auto-assigned yet."""
+        try:
+            NotificationQuery().create(
+                recipient_user_id=str(member.id), type="claim_submitted",
+                title=f"Claim received: {claim.claim_number}",
+                body="We've received your claim and it's now being reviewed.",
+                ref_id=str(claim.id), ref_type="policy_claim",
+            )
+        except Exception:
+            logger.exception("Failed to create in-app notification for member %s", member.id)
+        context = {
+            "member_name": member.name or member.email, "claim_number": claim.claim_number,
+            "policy_number": policy_number, "agent_name": agent_name or "",
+        }
+        try:
+            EmailService().send_from_template(str(member.email), "claim_submitted_member", context)
+        except Exception:
+            logger.exception("Failed to email member %s about claim submission", member.email)
+
     def _notify_admins_claim_submitted(self, claim, member_name: str, policy_number: str, agent_name: str) -> None:
         notify_all_admins(
             type="claim_submitted",
@@ -188,6 +209,7 @@ class PolicyClaimService:
             self._notify_agent_assigned(claim, agent, member.name or member.email, policy.policy_number or "—")
             self._notify_admins_claim_submitted(claim, member.name or member.email, policy.policy_number or "—",
                                                 agent.name or agent.email)
+            self._notify_member_claim_submitted(claim, member, policy.policy_number or "—", agent.name or agent.email)
         else:
             self.query.add_log(
                 str(claim.id), "No claim agent is configured yet — awaiting manual assignment.",
@@ -199,6 +221,7 @@ class PolicyClaimService:
                 body="No CLAIMS_AGENT is configured — please assign this claim manually.",
                 ref_id=str(claim.id), ref_type="policy_claim",
             )
+            self._notify_member_claim_submitted(claim, member, policy.policy_number or "—", None)
         return claim
 
     # ── Reads ────────────────────────────────────────────────────────────────

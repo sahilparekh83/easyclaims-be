@@ -29,10 +29,13 @@ class CancelEnrollmentBody(BaseModel):
 admin_members_router = APIRouter()
 
 
-def _enrollment_dict(e) -> dict:
+def _enrollment_dict(e, partner=None, plan=None) -> dict:
     return {
         "partner_id": str(e.partner_id),
+        "partner_name": partner.name if partner else None,
+        "partner_code": partner.partner_code if partner else None,
         "plan_id": str(e.plan_id),
+        "plan_name": plan.name if plan else None,
         "status": e.status,
         "end_date": str(e.end_date),
     }
@@ -89,7 +92,7 @@ async def list_members(
           "email": "...",
           "mobile_no": "...",
           "is_active": true,
-          "enrollments": [ { partner_id, plan_id, status, end_date } ]
+          "enrollments": [ { partner_id, partner_name, partner_code, plan_id, plan_name, status, end_date } ]
         }
       ],
       "total": 20,
@@ -110,6 +113,11 @@ async def list_members(
         plan = planq.get_by_id(str(primary.plan_id)) if primary else None
         partner = partnerq.get_by_id(str(primary.partner_id)) if primary else None
         policy_count = len(pq.list_by_user(str(u.id)))
+        enrollment_dicts = []
+        for e in enrollments:
+            e_plan = planq.get_by_id(str(e.plan_id))
+            e_partner = partnerq.get_by_id(str(e.partner_id))
+            enrollment_dicts.append(_enrollment_dict(e, partner=e_partner, plan=e_plan))
         result.append({
             "id": str(u.id),
             "email": u.email,
@@ -121,7 +129,7 @@ async def list_members(
             "policy_count": policy_count,
             "plan_name": plan.name if plan else None,
             "partner_name": partner.name if partner else None,
-            "enrollments": [_enrollment_dict(e) for e in enrollments],
+            "enrollments": enrollment_dicts,
         })
 
     return ResponseModel.ok(data={
@@ -409,6 +417,7 @@ async def get_member(member_id: UUID, request: Request, _=Depends(require_permis
             "end_date": str(e.end_date) if e.end_date else None,
         })
 
+    partner_cache: dict = {}
     policy_list = []
     for p in policies:
         pt = ptq.get_by_id(str(p.policy_type_id))
@@ -418,6 +427,10 @@ async def get_member(member_id: UUID, request: Request, _=Depends(require_permis
             fm = mq.get_family_member(str(link.family_member_id))
             if fm:
                 linked_family.append({"id": str(fm.id), "name": fm.name, "relation": fm.relation})
+        pid = str(p.partner_id)
+        if pid not in partner_cache:
+            partner_cache[pid] = partnerq.get_by_id(pid)
+        partner = partner_cache[pid]
         policy_list.append({
             "id": str(p.id),
             "policy_number": p.policy_number,
@@ -430,6 +443,9 @@ async def get_member(member_id: UUID, request: Request, _=Depends(require_permis
             "has_file": bool(p.storage_key),
             "extracted_fields": p.extracted_fields or {},
             "linked_family_members": linked_family,
+            "partner_id": pid,
+            "partner_name": partner.name if partner else None,
+            "partner_code": partner.partner_code if partner else None,
         })
 
     return ResponseModel.ok(data={
