@@ -82,11 +82,11 @@ class EmailTemplateQuery:
                 session.expunge(t)
             return t
 
-    def list_all(self, partner_id: Optional[str] = None) -> List[EmailTemplate]:
-        """By default lists only system-default templates. Pass partner_id to also
+    def list_all(self, partner_id: Optional[str] = None, channel_type: str = "email") -> List[EmailTemplate]:
+        """By default lists only system-default email templates. Pass partner_id to also
         include that partner's overrides (used by the admin UI's per-partner view)."""
         with session_scope() as session:
-            q = session.query(EmailTemplate)
+            q = session.query(EmailTemplate).filter(EmailTemplate.channel_type == channel_type)
             if partner_id:
                 q = q.filter(
                     (EmailTemplate.partner_id.is_(None)) | (EmailTemplate.partner_id == partner_id)

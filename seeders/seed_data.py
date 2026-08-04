@@ -401,155 +401,6 @@ EMAIL_TEMPLATES = [
 ]
 
 
-WHATSAPP_TEMPLATES = [
-    {
-        "slug": "wa_welcome_member",
-        "description": "Sent to a new member on first enrollment",
-        "html_body": (
-            "Welcome to EasyClaims, {{ member_name }}! 🎉\n\n"
-            "You have been enrolled under *{{ partner_name }}*.\n\n"
-            "To upload your insurance policy document, visit:\n"
-            "{{ upload_url }}\n\n"
-            "For any queries, just send a message here."
-        ),
-    },
-    {
-        "slug": "wa_new_partner",
-        "description": "Sent to an existing member when a new partner is added",
-        "html_body": (
-            "Hi {{ member_name }}! 👋\n\n"
-            "You have been enrolled under a new partner on EasyClaims:\n"
-            "*{{ partner_name }}*\n\n"
-            "Your existing login credentials remain the same.\n"
-            "Log in to access your benefits: {{ login_url }}\n\n"
-            "— EasyClaims Team"
-        ),
-    },
-    {
-        "slug": "wa_membership_card",
-        "description": "Sent with the membership card PDF after enrollment",
-        "html_body": (
-            "🎟 *EasyClaims Membership Card*\n\n"
-            "👤 *Member:* {{ member_name }}\n"
-            "🏢 *Partner:* {{ partner_name }}\n"
-            "📋 *Plan:* {{ plan_name }}\n\n"
-            "*Benefits:*\n"
-            "• Family: {{ benefit_family }} member(s)\n"
-            "• Policy Slots: {{ benefit_slots }}\n"
-            "• Claim Support: {{ benefit_claim }}\n"
-            "{{ extra_benefits }}\n\n"
-            "Your membership card PDF is attached above.\n"
-            "Access your benefits: {{ login_url }}\n\n"
-            "— EasyClaims"
-        ),
-    },
-    {
-        "slug": "wa_policy_uploaded",
-        "description": "Sent to member when their policy document is received",
-        "html_body": (
-            "Hi {{ member_name }}! ✅\n\n"
-            "Your {{ policy_type }} policy document has been received.\n\n"
-            "We are verifying your document. You will be notified once it is approved."
-        ),
-    },
-    {
-        "slug": "wa_policy_rejected",
-        "description": "Sent to member when their uploaded document fails verification",
-        "html_body": (
-            "Hi {{ member_name }}! ❌\n\n"
-            "Your uploaded document for policy *{{ policy_number }}* could not be verified.\n\n"
-            "Reason: {{ reason }}\n\n"
-            "Please upload a valid insurance policy document."
-        ),
-    },
-    {
-        "slug": "wa_policy_approved",
-        "description": "Sent to member when their policy is approved and goes active",
-        "html_body": (
-            "Hi {{ member_name }}! ✅\n\n"
-            "Your *{{ policy_type }}* policy (*{{ policy_number }}*) has been verified and is now *Active*.\n\n"
-            "You can view the full details anytime on your EasyClaims dashboard."
-        ),
-    },
-    {
-        "slug": "wa_policy_expired",
-        "description": "Sent to member when a policy has expired",
-        "html_body": (
-            "Hi {{ member_name }}! 🔔\n\n"
-            "Your *{{ policy_type }}* policy (*{{ policy_number }}*) has expired.\n\n"
-            "Please upload your renewed policy document to maintain continuous coverage:\n"
-            "{{ upload_url }}\n\n"
-            "Need help? Just reply to this message."
-        ),
-    },
-    {
-        "slug": "wa_upload_reminder",
-        "description": "Reminder sent to members who haven't uploaded a policy document",
-        "html_body": (
-            "Hi {{ member_name }}! 👋\n\n"
-            "You are enrolled under *{{ partner_name }}* on EasyClaims, "
-            "but we haven't received your insurance policy document yet.\n\n"
-            "Please upload it here: {{ upload_url }}\n\n"
-            "If you need help, just reply to this message."
-        ),
-    },
-    {
-        "slug": "wa_policy_expiry_warning",
-        "description": "Sent to member when a policy is about to expire",
-        "html_body": (
-            "Hi {{ member_name }}! ⚠️\n\n"
-            "Your *{{ policy_type }}* policy (*{{ policy_number }}*) "
-            "is expiring in {{ days_left }} day(s) on *{{ end_date }}*.\n\n"
-            "Please renew your policy to avoid a lapse in coverage."
-        ),
-    },
-    {
-        "slug": "wa_ticket_raised",
-        "description": "Sent to member when their claim ticket is created",
-        "html_body": (
-            "Hi {{ member_name }}! 🎫\n\n"
-            "Your claim request has been received.\n\n"
-            "*Ticket ID:* {{ ticket_id }}\n"
-            "*Summary:* {{ summary }}\n\n"
-            "Our team will follow up with you shortly.\n\n"
-            "— EasyClaims Team"
-        ),
-    },
-    {
-        "slug": "wa_claim_assigned_agent",
-        "description": "Sent to a claim agent via WhatsApp when a claim is assigned or reassigned to them",
-        "html_body": (
-            "Hi {{ agent_name }}! 📋\n\n"
-            "A claim has been assigned to you.\n\n"
-            "*Claim Number:* {{ claim_number }}\n"
-            "*Member:* {{ member_name }}\n"
-            "*Policy:* {{ policy_number }}\n\n"
-            "— EasyClaims Team"
-        ),
-    },
-    {
-        "slug": "wa_claim_status_update_member",
-        "description": "Sent to the member via WhatsApp when their claim's status changes",
-        "html_body": (
-            "Hi {{ member_name }}! 📋\n\n"
-            "Your claim *{{ claim_number }}* is now *{{ new_status }}*.\n\n"
-            "{{ remark }}\n\n"
-            "— EasyClaims Team"
-        ),
-    },
-    {
-        "slug": "wa_claim_submitted_admin",
-        "description": "Sent to superadmins via WhatsApp when a new claim is submitted",
-        "html_body": (
-            "📋 New claim submitted\n\n"
-            "*Claim Number:* {{ claim_number }}\n"
-            "*Member:* {{ member_name }}\n"
-            "*Assigned Agent:* {{ agent_name }}"
-        ),
-    },
-]
-
-
 def seed_email_templates():
     from app.db.queries.email_template_query import EmailTemplateQuery
     tq = EmailTemplateQuery()
@@ -561,20 +412,11 @@ def seed_email_templates():
             description=tpl.get("description", ""),
             channel_type="email",
         )
-    for tpl in WHATSAPP_TEMPLATES:
-        tq.create_if_not_exists(
-            slug=tpl["slug"],
-            html_body=tpl["html_body"],
-            description=tpl.get("description", ""),
-            channel_type="whatsapp",
-        )
     logger.info("Email templates seeded: %d entries", len(EMAIL_TEMPLATES))
-    logger.info("WhatsApp templates seeded: %d entries", len(WHATSAPP_TEMPLATES))
 
 
-# Meta WhatsApp Cloud API template metadata — separate from WHATSAPP_TEMPLATES
-# above (those hold the free-form Jinja bodies used by the Twilio flow). Meta's
-# approved templates need fixed copy + positional {{1}},{{2}}.. variables instead,
+# Meta WhatsApp Cloud API template metadata. Meta's approved templates need
+# fixed copy + positional {{1}},{{2}}.. variables instead of free-form Jinja bodies,
 # so each row here just tracks which variables (and in what order) the eventual
 # Meta-approved template expects. meta_template_name stays blank until an admin
 # fills it in after the template is created + approved in Meta Business Manager.
